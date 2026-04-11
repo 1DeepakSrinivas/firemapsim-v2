@@ -1,1 +1,1 @@
-export const CONTEXT7_CALL_COUNT = 2;
+export const CONTEXT7_CALL_COUNT = 3;

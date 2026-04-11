@@ -1,3 +1,11 @@
 ---
-alwaysApply: true
+description: Database architecture, Drizzle ORM, and Supabase usage.
+globs: src/db/**/*.ts, src/lib/supabase.ts, drizzle.config.ts
 ---
+# Database Configuration
+
+- Primary ORM: Drizzle ORM with `drizzle-orm/node-postgres` and the `pg` Pool.
+- Dialect: PostgreSQL.
+- Supabase Usage: Use Drizzle for all database queries. The Supabase client (`@supabase/supabase-js`) is strictly reserved for storage and realtime features only. Do not use Supabase Auth.
+- Migrations: Use `bun run db:push` for local schema prototyping.
+- Primary Keys: Use UUIDs with `default gen_random_uuid()` for database IDs unless specified otherwise by Better Auth requirements.
