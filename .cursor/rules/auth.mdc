@@ -1,0 +1,12 @@
+---
+description: Better Auth configuration and middleware protection.
+globs: src/lib/auth*.ts, src/app/api/auth/**/*.ts, src/middleware.ts, src/app/(auth)/**/*.tsx
+---
+# Authentication Standards
+
+- Library: Better Auth.
+- Adapter: `better-auth/adapters/drizzle`.
+- Plugins: Enable `emailAndPassword` and `admin` with roles `owner`, `planner`, `viewer`.
+- Passwords: Retain default scrypt hashing.
+- Routing: Protect all routes under `/dashboard` using the session check in `middleware.ts`. Redirect unauthenticated traffic to `/login`.
+- Allowlist: `/login`, `/signup`, `/api/auth/*`, and `/` remain unauthenticated.

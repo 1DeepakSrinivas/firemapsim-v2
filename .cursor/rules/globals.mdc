@@ -1,0 +1,11 @@
+---
+description: Global project standards, tech stack, and package management.
+globs: *.*
+---
+# FireSim Global Standards
+
+- Tech Stack: Next.js 15 App Router, Bun runtime, TypeScript, Tailwind CSS v4, Shadcn/ui.
+- Package Manager: Always use `bun` for installing packages and running scripts. Do not use `npm` or `yarn`.
+- Documentation: Rely on Context7 for up-to-date documentation regarding Mastra, Better Auth, Next.js, and Drizzle.
+- Proxies: The DEVS-FIRE server uses plain HTTP. Never call it directly from the browser; always proxy through Next.js API routes.
+- Types: Enforce strict TypeScript types across all files.

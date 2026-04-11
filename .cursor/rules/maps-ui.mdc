@@ -1,0 +1,11 @@
+---
+description: Map rendering, drawing tools, and UI components.
+globs: src/components/**/*.tsx, src/app/(protected)/**/*.tsx
+---
+# Frontend UI and Maps
+
+- Leaflet Integration: Use `react-leaflet`. Dynamic import with `ssr: false` is required to prevent Next.js server-side rendering crashes.
+- Tile Provider: Render standard OpenStreetMap tiles.
+- Drawing Engine: Layer `fabric.js` transparently over the Leaflet map for drawing tools. Toggle pointer events based on the active tool.
+- Icons: Use `lucide-react`.
+- State Management: Streaming chat relies on `useChat` from `ai/react`. SSE events utilize a custom `useSimulationStream` hook parsing `TransformStream` events.

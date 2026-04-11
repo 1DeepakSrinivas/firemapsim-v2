@@ -1,0 +1,12 @@
+---
+description: Agent construction, workflows, and tool calling conventions.
+globs: src/mastra/**/*.ts, src/app/api/agent/**/*.ts, src/app/api/simulation/**/*.ts
+---
+# Mastra Configuration
+
+- Base HTTP: All DEVS-FIRE external calls are POST requests to `http://firesim.cs.gsu.edu:8084/api`.
+- Tool Structure: Use `@mastra/core` `createTool`. Define inputs strictly with `zod`. Make HTTP POST calls using Bun's native `fetch`.
+- LLM Provider: Use `claude-sonnet-4-5` via `@ai-sdk/anthropic`.
+- Memory: Enable Mastra memory with `upstash/libsql` storage pointing to the global `DATABASE_URL`.
+- Workflows: Use parallel execution for independent steps, such as geo and weather fetching.
+- Responses: Ensure API routes serving agent output utilize the Vercel AI SDK `toDataStreamResponse()` method.
