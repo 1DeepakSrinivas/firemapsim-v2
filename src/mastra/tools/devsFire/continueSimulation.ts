@@ -13,22 +13,22 @@ const inputSchema = z.object({
   time: z.number(),
 });
 
-export const runSimulation = createTool({
-  id: "devs-fire-run-simulation",
-  description: "Run DEVS-FIRE simulation from scratch.",
+export const continueSimulation = createTool({
+  id: "devs-fire-continue-simulation",
+  description: "Continue a DEVS-FIRE simulation for additional time.",
   inputSchema,
   outputSchema: simulationOperationListSchema,
   execute: async ({ userToken, time }) => {
     try {
       const data = await devsFireProxyPost(
-        "/runSimulation/",
+        "/continueSimulation/",
         userToken,
         { time },
       );
 
-      return parseSimulationOperationsResponse(data, "/runSimulation/");
+      return parseSimulationOperationsResponse(data, "/continueSimulation/");
     } catch (error) {
-      throw new Error(`runSimulation failed: ${toErrorMessage(error)}`);
+      throw new Error(`continueSimulation failed: ${toErrorMessage(error)}`);
     }
   },
 });

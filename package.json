@@ -14,6 +14,7 @@
   "dependencies": {
     "@mastra/core": "^1.24.1",
     "@mastra/deployer-vercel": "^1.1.16",
+    "@mastra/libsql": "^1.8.0",
     "@mastra/memory": "^1.15.0",
     "@supabase/supabase-js": "^2.103.0",
     "@types/leaflet": "^1.9.21",
