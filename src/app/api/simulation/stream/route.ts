@@ -29,6 +29,29 @@ function parseQueryAsInput(searchParams: URLSearchParams): SimulateWorkflowInput
   };
 }
 
+/** Pull Mastra writer payloads so the client gets stable { stage, ... } shapes */
+function extractSimulationProgress(event: unknown, depth = 0): unknown {
+  if (depth > 8 || !event || typeof event !== "object") {
+    return null;
+  }
+  const o = event as Record<string, unknown>;
+  if (o.type === "data-simulation-progress" && o.data != null) {
+    return o.data;
+  }
+  for (const v of Object.values(o)) {
+    const found = extractSimulationProgress(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function unwrapWorkflowResult(result: unknown): unknown {
+  if (result && typeof result === "object" && "result" in result) {
+    return (result as { result: unknown }).result;
+  }
+  return result;
+}
+
 export async function GET(request: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
@@ -58,13 +81,17 @@ export async function GET(request: NextRequest) {
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          for await (const event of output.fullStream as any) {
-            controller.enqueue(
-              encoder.encode(jsonSseEvent("simulation-event", event)),
-            );
+          for await (const event of output.fullStream as AsyncIterable<unknown>) {
+            const progress = extractSimulationProgress(event);
+            if (progress) {
+              controller.enqueue(
+                encoder.encode(jsonSseEvent("simulation-progress", progress)),
+              );
+            }
           }
 
-          const result = await output.result;
+          const rawResult = await output.result;
+          const result = unwrapWorkflowResult(rawResult);
           controller.enqueue(encoder.encode(jsonSseEvent("simulation-result", result)));
           controller.close();
         } catch (error) {

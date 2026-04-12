@@ -7,11 +7,13 @@
     "dev:next": "next dev",
     "dev:mastra": "mastra dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "bun test"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.160",
     "@clerk/nextjs": "^7.0.12",
+    "@mastra/ai-sdk": "^1.3.3",
     "@mastra/core": "^1.24.1",
     "@mastra/deployer-vercel": "^1.1.16",
     "@mastra/libsql": "^1.8.0",

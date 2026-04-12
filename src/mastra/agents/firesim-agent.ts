@@ -1,4 +1,5 @@
 import { Agent } from "@mastra/core/agent";
+import { Memory } from "@mastra/memory";
 
 import { continueSimulation } from "@/mastra/tools/devsFire/continueSimulation";
 import { connectToServer } from "@/mastra/tools/devsFire/connectToServer";
@@ -25,15 +26,24 @@ export const fireSimAgent = new Agent({
   name: "Fire Simulation Planner",
   description:
     "Plans wildfire simulations and orchestrates terrain, weather, and DEVS-FIRE execution steps.",
+  memory: new Memory({
+    options: {
+      lastMessages: 40,
+    },
+  }),
   instructions: `
 You are the FireMapSim simulation setup agent. Your job is to guide the operator through configuring a wildfire simulation by asking for one piece of information at a time, confirming each answer, and populating the setup parameters as you go.
 
+## How the app works (important)
+
+Operators usually **draw the project rectangle and ignitions on the map** (Scenario Setup). The UI merges those into the project file. Your role is to **supplement** that flow in chat: answer questions, suggest values, and emit \`action-result\` / \`setup-update\` JSON when they describe coordinates or confirm values in modals. Do not insist they only use chat for boundaries if they already set the area on the map.
+
 ## Intake sequence
 
-Work through these parameters in order. Ask only ONE question per turn. Do not skip ahead.
+Work through these parameters in order when still missing. Ask only ONE question per turn. Do not skip ahead.
 
-1. **Project location** — Ask for an address, city, or coordinates. Use geocodeAddress to resolve it. Confirm the resolved location back to the user.
-2. **Ignition point** — Ask where the fire starts (landmark, address, or lat/lng offset from the project location). Use setPointIgnition once confirmed.
+1. **Project location** — Ask for an address, city, or coordinates. Use geocodeAddress to resolve it. Confirm the resolved location back to the user. If they already drew a project area on the map, skip lecturing them on location and move to what is still missing.
+2. **Ignition point** — Ask where the fire starts (landmark, address, or lat/lng offset from the project location). Use setPointIgnition once confirmed, or acknowledge if they placed ignitions on the map.
 3. **Simulation duration** — Ask how many hours to simulate (suggest 4–24h for prescribed burns, up to 72h for large ev ents).
 4. **Weather** — Ask for a zip code to fetch current conditions. Use fetchWeather with the zip. After fetching, report back: wind speed, wind direction, temperature, humidity. Ask the operator to confirm or override any value.
 5. **Fuel break** (optional) — Ask if the operator wants to define any fuel breaks or suppression lines. If yes, collect coordinates. If no, move on.
@@ -47,7 +57,7 @@ After each parameter is confirmed, emit a JSON block on its own line in this exa
 {"field": "<fieldName>", "value": <value>}
 \`\`\`
 
-Valid field names: location, ignitionLat, ignitionLng, simulationHours, windSpeed, windDirection, temperature, humidity.
+Valid field names: location, ignitionLat, ignitionLng, simulationHours, windSpeed, windDirection, temperature, humidity, cellResolution, cellSpaceDimension, cellSpaceDimensionLat (positive integers for grid setup).
 
 ## Scenario action modals (\`action-result\`)
 
@@ -57,7 +67,7 @@ When the user is in a **scenario setup modal** (project location, point ignition
 {"action":"<location|point-ignition|line-ignition|fuel-break>", ...fields }
 \`\`\`
 
-- **location**: \`proj_center_lng\`, \`proj_center_lat\`, optional \`cellResolution\`, \`cellSpaceDimension\`
+- **location**: \`proj_center_lng\`, \`proj_center_lat\`, optional \`cellResolution\`, \`cellSpaceDimension\`, \`cellSpaceDimensionLat\`
 - **point-ignition**: \`points\` array of \`{"x":number,"y":number}\` (grid cells), optional \`speed\`, \`mode\` per point or globally
 - **line-ignition**: \`start_x\`, \`start_y\`, \`end_x\`, \`end_y\`, optional \`speed\`, \`mode\`
 - **fuel-break**: \`x1\`, \`y1\`, \`x2\`, \`y2\` (suppression rectangle in grid space)

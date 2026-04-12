@@ -3,6 +3,9 @@ import z from "zod";
 
 import { devsFirePost, toErrorMessage } from "@/mastra/tools/devsFire/_client";
 
+/** Upstream GSU server can be slow; abort avoids hanging the Next.js handler indefinitely. */
+const DEVS_FIRE_PROXY_TIMEOUT_MS = 120_000;
+
 const queryValueSchema = z.union([
   z.string(),
   z.number(),
@@ -25,18 +28,43 @@ export async function POST(request: NextRequest) {
     const json = await request.json();
     const payload = requestSchema.parse(json);
 
-    const data = await devsFirePost(
-      payload.path,
-      payload.token,
-      payload.params ?? {},
-      payload.body,
-      payload.headers ?? {},
-    );
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEVS_FIRE_PROXY_TIMEOUT_MS);
+
+    let data: unknown;
+    try {
+      data = await devsFirePost(
+        payload.path,
+        payload.token,
+        payload.params ?? {},
+        payload.body,
+        payload.headers ?? {},
+        { signal: controller.signal },
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     return NextResponse.json({ data });
   } catch (error) {
-    const status = error instanceof z.ZodError ? 400 : 500;
-    return NextResponse.json({ error: toErrorMessage(error) }, { status });
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      return NextResponse.json(
+        {
+          error: `DEVS-FIRE request timed out after ${DEVS_FIRE_PROXY_TIMEOUT_MS / 1000}s.`,
+        },
+        { status: 504 },
+      );
+    }
+    const message = toErrorMessage(error);
+    const upstreamOrNetwork =
+      message.includes("DEVS-FIRE request failed") || message.includes("fetch failed");
+    return NextResponse.json(
+      { error: message },
+      { status: upstreamOrNetwork ? 502 : 500 },
+    );
   }
 }
 
