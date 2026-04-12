@@ -1,11 +1,10 @@
 ---
-description: Database architecture, Drizzle ORM, and Supabase usage.
-globs: src/db/**/*.ts, src/lib/supabase.ts, drizzle.config.ts
+description: Supabase database and server access patterns.
+globs: supabase/**/*.sql, src/lib/supabase.ts, src/lib/user-store.ts, src/app/api/**/route.ts
 ---
 # Database Configuration
 
-- Primary ORM: Drizzle ORM with `drizzle-orm/node-postgres` and the `pg` Pool.
-- Dialect: PostgreSQL.
-- Supabase Usage: Use Drizzle for all database queries. The Supabase client (`@supabase/supabase-js`) is strictly reserved for storage and realtime features only. Do not use Supabase Auth.
-- Migrations: Use `bun run db:push` for local schema prototyping.
-- Primary Keys: Use UUIDs with `default gen_random_uuid()` for database IDs unless specified otherwise by Better Auth requirements.
+- **Access**: Use `@supabase/supabase-js` with the **service role** client from [`src/lib/supabase.ts`](src/lib/supabase.ts) only in **server** code (Route Handlers, Server Actions). Never expose the service role key to the browser.
+- **Auth**: App auth is **Clerk**. Every query must scope by `user_id` from `auth()` in the API route; do not trust client-supplied user ids.
+- **Schema**: Apply SQL under [`supabase/migrations/`](supabase/migrations/). Enable RLS on public tables; restrict `anon`/`authenticated` when using the service role only from Next.js.
+- **Primary keys**: Prefer UUIDs with `gen_random_uuid()` where appropriate.
