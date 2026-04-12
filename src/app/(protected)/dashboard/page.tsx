@@ -12,6 +12,7 @@ import {
   MapPin,
   Play,
   Search,
+  Trash2,
   User,
 } from "lucide-react";
 
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,6 +84,22 @@ export default function DashboardPage() {
       router.push(`/${segment}/${body.id}`);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function deleteProject(projectId: string, title: string) {
+    const confirmed = window.confirm(
+      `Delete project \"${title}\"? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingProjectId(projectId);
+    try {
+      const res = await fetch(`/api/project/${projectId}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    } finally {
+      setDeletingProjectId(null);
     }
   }
 
@@ -174,18 +192,28 @@ export default function DashboardPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((p) => (
-              <Link
+              <div
                 key={p.id}
-                href={pathSlug ? `/${pathSlug}/${p.id}` : "#"}
                 className="group flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/3 p-4 transition hover:border-white/15 hover:bg-white/5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-sm font-medium leading-snug text-white/90 group-hover:text-white">
                     {p.title}
                   </p>
-                  <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/50">
-                    Map
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/50">
+                      Map
+                    </span>
+                    <button
+                      type="button"
+                      disabled={deletingProjectId === p.id}
+                      title="Delete project"
+                      onClick={() => void deleteProject(p.id, p.title)}
+                      className="rounded-md border border-red-500/25 bg-red-500/10 p-1 text-red-300/80 transition hover:bg-red-500/20 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5 text-[11px] text-white/40">
@@ -201,10 +229,13 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                <span className="mt-auto w-full rounded-lg border border-white/10 py-1.5 text-center text-[11px] text-white/50 transition group-hover:border-orange-500/30 group-hover:text-orange-400/90">
+                <Link
+                  href={pathSlug ? `/${pathSlug}/${p.id}` : "#"}
+                  className="mt-auto w-full rounded-lg border border-white/10 py-1.5 text-center text-[11px] text-white/50 transition group-hover:border-orange-500/30 group-hover:text-orange-400/90"
+                >
                   Open project
-                </span>
-              </Link>
+                </Link>
+              </div>
             ))}
           </div>
         )}

@@ -6,6 +6,7 @@ import type { UIMessage } from "ai";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Parsed from fenced setup-update blocks; field may be weather keys or cellResolution / cellSpaceDimension / cellSpaceDimensionLat. */
 export type SetupUpdate = {
   field: string;
   value: number | string;
@@ -24,6 +25,10 @@ type CedarCaptionChatProps = {
       | { parts: Array<{ type: "text"; text: string }>; messageId?: string },
   ) => Promise<void>;
   onSetupUpdate?: (update: SetupUpdate) => void;
+  showStarterPrompt?: boolean;
+  starterPromptText?: string;
+  onSendStarterPrompt?: () => Promise<void>;
+  onDismissStarterPrompt?: () => Promise<void>;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -33,12 +38,6 @@ function getMessageText(message: UIMessage): string {
     .filter((p) => p.type === "text")
     .map((p) => p.text)
     .join("");
-}
-
-function getRoleLabel(role: string, userName?: string): string {
-  if (role === "user") return (userName ?? "USER").toUpperCase();
-  if (role === "assistant") return "AGENT";
-  return role.toUpperCase();
 }
 
 /**
@@ -74,14 +73,19 @@ export function CedarCaptionChat({
   dimensions,
   className,
   showThinking = true,
-  userName,
+  userName: _userName,
   messages,
   status,
   sendMessage,
   onSetupUpdate,
+  showStarterPrompt = false,
+  starterPromptText,
+  onSendStarterPrompt,
+  onDismissStarterPrompt,
 }: CedarCaptionChatProps) {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(true);
+  const [starterBusy, setStarterBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const processedIds = useRef<Set<string>>(new Set());
   const isBusy = status === "submitted" || status === "streaming";
@@ -106,14 +110,6 @@ export function CedarCaptionChat({
       for (const u of updates) onSetupUpdate(u);
     }
   }, [messages, status, onSetupUpdate]);
-
-  // Kick off the intake sequence on first mount
-  const bootstrapped = useRef(false);
-  useEffect(() => {
-    if (bootstrapped.current || messages.length > 0) return;
-    bootstrapped.current = true;
-    void sendMessage({ text: "Hello, I'm ready to set up a simulation. Please guide me." });
-  }, [messages.length, sendMessage]);
 
   async function submitPrompt(prompt: string) {
     const value = prompt.trim();
@@ -178,41 +174,84 @@ export function CedarCaptionChat({
         </div>
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="cedar-scroll max-h-40 space-y-1.5 overflow-y-auto p-2.5 sm:max-h-52 sm:space-y-2 sm:p-3">
+      {/* Messages — iMessage-style bubbles */}
+      <div
+        ref={scrollRef}
+        className="cedar-scroll max-h-40 space-y-1 overflow-y-auto bg-[#0a0a0a]/50 p-2.5 sm:max-h-52 sm:space-y-1.5 sm:p-3"
+      >
         {messages.length === 0 ? (
           <p className="rounded-lg border border-dashed border-white/10 p-2.5 text-[10px] text-white/30 sm:p-3 sm:text-[11px]">
             Starting simulation setup…
           </p>
         ) : null}
 
+        {showStarterPrompt && starterPromptText ? (
+          <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-2.5 sm:p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-200/90 sm:text-[11px]">
+              Suggested starter prompt
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-white/90 sm:text-[12px]">
+              {starterPromptText}
+            </p>
+            <div className="mt-2 flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                disabled={starterBusy || isBusy}
+                onClick={async () => {
+                  if (!onSendStarterPrompt) return;
+                  setStarterBusy(true);
+                  try {
+                    await onSendStarterPrompt();
+                  } finally {
+                    setStarterBusy(false);
+                  }
+                }}
+                className="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40 sm:text-[11px]"
+              >
+                Send
+              </button>
+              <button
+                type="button"
+                disabled={starterBusy || isBusy}
+                onClick={async () => {
+                  if (!onDismissStarterPrompt) return;
+                  setStarterBusy(true);
+                  try {
+                    await onDismissStarterPrompt();
+                  } finally {
+                    setStarterBusy(false);
+                  }
+                }}
+                className="rounded-md border border-white/15 px-2.5 py-1 text-[10px] font-medium text-white/70 transition hover:bg-white/8 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 sm:text-[11px]"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {messages.map((message) => {
           const raw = getMessageText(message);
           const isUser = message.role === "user";
           const { displayText } = parseMessageContent(raw);
-          const roleLabel = getRoleLabel(message.role, userName);
           const isLastAssistant = !isUser && message === messages[messages.length - 1];
 
           return (
             <div
               key={message.id}
-              className={`rounded-lg px-2.5 py-2 text-[11px] sm:px-3 sm:py-2.5 sm:text-xs ${
-                isUser
-                  ? "border border-blue-500/20 bg-blue-500/10"
-                  : "border border-white/5 bg-white/4"
-              }`}
+              className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}
             >
-              <div className="mb-1 flex items-center justify-between sm:mb-1.5">
-                <p className={`text-[9px] font-bold tracking-widest sm:text-[10px] ${isUser ? "text-blue-400" : "text-white/40"}`}>
-                  {roleLabel}
+              <div
+                className={`max-w-[min(100%,14rem)] px-2.5 py-1.5 text-left text-[11px] leading-snug shadow-sm sm:max-w-[min(72%,18rem)] sm:px-3 sm:py-2 sm:text-[12px] ${
+                  isUser
+                    ? "rounded-[0.95rem] rounded-br-sm bg-[#0A84FF] text-white text-pretty"
+                    : "rounded-[0.95rem] rounded-bl-sm bg-[#3A3A3C] text-white/95 text-pretty"
+                }`}
+              >
+                <p className="whitespace-pre-wrap">
+                  {displayText || (isBusy && isLastAssistant ? "…" : "")}
                 </p>
-                {isLastAssistant && isBusy && (
-                  <span className="text-[9px] text-white/30 sm:text-[10px]">Streaming ↑</span>
-                )}
               </div>
-              <p className="whitespace-pre-wrap leading-relaxed text-white/80">
-                {displayText || (isBusy && isLastAssistant ? "…" : "")}
-              </p>
             </div>
           );
         })}
