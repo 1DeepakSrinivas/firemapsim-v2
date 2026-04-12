@@ -59,6 +59,7 @@ export async function POST() {
         title,
         plan,
         weather: w,
+        agent_chat_intro_done: false,
         updated_at: new Date().toISOString(),
       })
       .select("id")
