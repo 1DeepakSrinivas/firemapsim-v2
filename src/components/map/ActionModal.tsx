@@ -59,7 +59,7 @@ export const ACTION_MODAL_CONFIGS: Record<ActionId, ActionModalConfig> = {
     id: "fuel-break",
     title: "Define Fuel Break",
     agentSeed:
-      "Help me define a rectangular fuel break / suppression region in grid coordinates (x1, y1, x2, y2). When ready, output ```action-result``` JSON with action \"fuel-break\" and numeric fields.",
+      "Help me define a linear fuel break / suppression segment in grid coordinates (x1, y1) to (x2, y2). When ready, output ```action-result``` JSON with action \"fuel-break\" and numeric fields.",
     fields: [
       { key: "x1", label: "X1", type: "number" },
       { key: "y1", label: "Y1", type: "number" },
@@ -194,7 +194,6 @@ export function payloadFromAgentJson(
         y1,
         x2,
         y2,
-        splitIntoRectangleEdges: true,
       };
     }
     default:
@@ -292,7 +291,6 @@ function manualFormToPayload(actionId: ActionId, values: Record<string, string>)
         y1,
         x2,
         y2,
-        splitIntoRectangleEdges: true,
       };
     }
     default:
@@ -394,7 +392,7 @@ function AgentTabBody({
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
-        className="cedar-scroll mb-2 max-h-48 space-y-2 overflow-y-auto rounded-lg border border-white/8 bg-black/20 p-2"
+        className="cedar-scroll mb-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-white/8 bg-[#0a0a0a]/45 p-2"
       >
         {messages.map((message) => {
           const raw = getMessageText(message);
@@ -403,17 +401,20 @@ function AgentTabBody({
           return (
             <div
               key={message.id}
-              className={cn(
-                "rounded-lg px-2.5 py-2 text-[11px]",
-                isUser ? "bg-blue-500/10 text-white/90" : "bg-white/5 text-white/75",
-              )}
+              className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
             >
-              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wide text-white/35">
-                {isUser ? "You" : "Agent"}
-              </p>
-              <p className="whitespace-pre-wrap leading-relaxed">
-                {displayText || (isBusy && message === messages[messages.length - 1] && !isUser ? "…" : "")}
-              </p>
+              <div
+                className={cn(
+                  "max-w-[min(100%,14rem)] px-2.5 py-1.5 text-left text-[11px] leading-snug shadow-sm sm:max-w-[min(72%,18rem)] sm:px-3 sm:py-2 sm:text-[12px]",
+                  isUser
+                    ? "rounded-[0.95rem] rounded-br-sm bg-[#0A84FF] text-white text-pretty"
+                    : "rounded-[0.95rem] rounded-bl-sm bg-[#3A3A3C] text-white/95 text-pretty",
+                )}
+              >
+                <p className="whitespace-pre-wrap">
+                  {displayText || (isBusy && message === messages[messages.length - 1] && !isUser ? "…" : "")}
+                </p>
+              </div>
             </div>
           );
         })}
@@ -790,15 +791,8 @@ function FuelBreakModal({
         <DrawModeButton
           icon={Minus}
           label="Multi-node line"
-          description="Click multiple nodes to trace a complex fuel break path, double-click to finish"
+          description="Click multiple nodes to trace a complex fuel break path, then press Escape to finish"
           onClick={() => { onRequestMapDraw?.("polyline"); onClose(); }}
-        />
-        <DrawModeButton
-          icon={RectangleHorizontal}
-          label="Rectangle area"
-          description="Click two opposite corners to define a rectangular suppression zone"
-          color="sky"
-          onClick={() => { onRequestMapDraw?.("rect"); onClose(); }}
         />
       </div>
 

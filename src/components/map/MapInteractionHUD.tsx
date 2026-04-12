@@ -7,7 +7,7 @@ import type { MapInteractionMode } from "./MapInteractionLayer";
 const INSTRUCTIONS: Record<NonNullable<MapInteractionMode>, string> = {
   pin: "Click anywhere on the map to drop the ignition pin",
   line: "Click to set the start point, then click again to set the end point",
-  polyline: "Click to add nodes along the fuel break path — double-click to finish",
+  polyline: "Click to add nodes along the fuel break path — press Escape to finish",
   polygon: "Click to add boundary nodes — double-click to close the polygon",
   rect: "Click to set the first corner, then click again to set the opposite corner",
 };

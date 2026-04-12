@@ -1,8 +1,6 @@
 "use client";
 
-import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import { useChat } from "@ai-sdk/react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -10,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Flame, Home, Play } from "lucide-react";
 
 import { CedarCaptionChat, type SetupUpdate } from "@/chatComponents/CedarCaptionChat";
+import { ProjectAgentChatHost } from "@/components/map/ProjectAgentChatHost";
 import FireMap from "@/components/map/FireMap";
 import FireOverlay from "@/components/map/FireOverlay";
 import { MapInteractionHUD } from "@/components/map/MapInteractionHUD";
@@ -22,7 +21,7 @@ import type {
 } from "@/components/map/types";
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 
-import { useSimulationStream } from "@/hooks/useSimulationStream";
+import { normalizeOverlay } from "@/lib/simulationOverlay";
 import {
   hasSavedProjectMapPosition,
   navigateMapToProject,
@@ -67,14 +66,18 @@ function messageToText(message: UIMessage): string {
     .join("");
 }
 
-function toSimulationQuery(bounds: BoundsChangePayload | null): string {
-  const params = new URLSearchParams();
-  if (bounds) {
-    params.set("lat", String(bounds.lat));
-    params.set("lng", String(bounds.lng));
+function dedupeMessagesById(messages: UIMessage[]): UIMessage[] {
+  const seen = new Set<string>();
+  const out: UIMessage[] = [];
+
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || seen.has(msg.id)) continue;
+    seen.add(msg.id);
+    out.unshift(msg);
   }
-  params.set("simulationHours", "24");
-  return params.toString();
+
+  return out;
 }
 
 function statsFromOverlay(points: FireOverlayPoint[]) {
@@ -91,6 +94,20 @@ function statsFromOverlay(points: FireOverlayPoint[]) {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+type WeatherOverrideState = Partial<WeatherValues>;
+
+function mergeWeather(
+  fetched: WeatherValues,
+  overrides: WeatherOverrideState,
+): WeatherValues {
+  return {
+    windSpeed: overrides.windSpeed ?? fetched.windSpeed,
+    windDirection: overrides.windDirection ?? fetched.windDirection,
+    temperature: overrides.temperature ?? fetched.temperature,
+    humidity: overrides.humidity ?? fetched.humidity,
+  };
+}
+
 export function ProjectWorkspace({
   userSlug,
   projectId,
@@ -103,17 +120,24 @@ export function ProjectWorkspace({
 
   const [mapRef, setMapRef] = useState<import("leaflet").Map | null>(null);
   const [mapBounds, setMapBounds] = useState<BoundsChangePayload | null>(null);
-  const [simulationId, setSimulationId] = useState<string | null>(null);
   const [lastSimulationSnapshot, setLastSimulationSnapshot] =
     useState<LastSimulationSnapshot | null>(null);
   const [replayFrame, setReplayFrame] = useState<FireOverlayPoint[] | null>(null);
   const [isReplayAnimating, setIsReplayAnimating] = useState(false);
-  const prevStreamStatusRef = useRef<"idle" | "open" | "closed" | "error">("idle");
+  const [simulationRun, setSimulationRun] = useState<{
+    status: "idle" | "running" | "ready" | "error";
+    error: string | null;
+    weatherSource?: string;
+  }>({ status: "idle", error: null });
   const replayTimersRef = useRef<number[]>([]);
   const [drawnShapes, setDrawnShapes] = useState<PolygonFeature[]>([]);
   const [mapStyle, setMapStyle] = useState<MapStyleId>("terrain");
 
   const [weather, setWeather] = useState<WeatherValues>({ ...DEFAULT_WEATHER });
+  const [weatherOverrides, setWeatherOverrides] =
+    useState<WeatherOverrideState>({});
+
+  const weatherOverridesRef = useRef<WeatherOverrideState>({});
 
   const [projectConfig, setProjectConfig] = useState<IgnitionPlan>(() => defaultIgnitionPlan());
 
@@ -134,6 +158,7 @@ export function ProjectWorkspace({
   const [titleDraft, setTitleDraft] = useState(projectTitle);
 
   const skipSaveAfterLoadRef = useRef(true);
+  const lastSavedPayloadRef = useRef<string | null>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -147,20 +172,29 @@ export function ProjectWorkspace({
   const pendingPolygonRef = useRef<import("leaflet").LatLng[]>([]);
   const interactionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMapPositionNavKeyRef = useRef<string | null>(null);
+  const readyBadgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const {
-    fireOverlay: streamedOverlay,
-    perimeterGeoJSON,
-    stats,
-    streamStatus,
-  } = useSimulationStream(simulationId);
+  const [agentChatSnapshot, setAgentChatSnapshot] = useState<{
+    messages: UIMessage[];
+    introDone: boolean;
+  } | null>(null);
+  const [chatMountKey, setChatMountKey] = useState(0);
 
-  const { messages, status, sendMessage } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/agent",
-      body: () => ({ threadId: `project-${projectId}` }),
-    }),
-  });
+  useEffect(() => {
+    weatherOverridesRef.current = weatherOverrides;
+  }, [weatherOverrides]);
+
+  const handleAgentChatPersist = useCallback((messages: UIMessage[], introDone: boolean) => {
+    const deduped = dedupeMessagesById(messages);
+    setAgentChatSnapshot((prev) => ({
+      messages: deduped,
+      introDone,
+    }));
+  }, []);
+
+  const handleAgentIntroClaimed = useCallback(() => {
+    setAgentChatSnapshot((p) => (p ? { ...p, introDone: true } : p));
+  }, []);
 
   const clearReplayTimers = useCallback(() => {
     replayTimersRef.current.forEach(clearTimeout);
@@ -208,50 +242,118 @@ export function ProjectWorkspace({
   }, [clearReplayTimers]);
 
   const effectiveOverlay = useMemo<FireOverlayPoint[]>(() => {
-    if (streamStatus === "open") return streamedOverlay;
     if (isReplayAnimating && replayFrame) return replayFrame;
     return lastSimulationSnapshot?.overlay ?? [];
-  }, [
-    streamStatus,
-    streamedOverlay,
-    isReplayAnimating,
-    replayFrame,
-    lastSimulationSnapshot,
-  ]);
+  }, [isReplayAnimating, replayFrame, lastSimulationSnapshot]);
 
   const effectivePerimeter = useMemo(() => {
-    if (streamStatus === "open") return perimeterGeoJSON;
     if (isReplayAnimating) return null;
     return lastSimulationSnapshot?.perimeterGeoJSON ?? null;
-  }, [streamStatus, perimeterGeoJSON, isReplayAnimating, lastSimulationSnapshot]);
+  }, [isReplayAnimating, lastSimulationSnapshot]);
 
-  useEffect(() => {
-    const prev = prevStreamStatusRef.current;
-    prevStreamStatusRef.current = streamStatus;
-    if (prev !== "open" || streamStatus !== "closed") return;
-    if (streamedOverlay.length === 0) return;
+  const handleStartSimulation = useCallback(
+    async (simulationTimesteps: number) => {
+      if (simulationRun.status === "running") return;
+      clearReplayTimers();
+      setReplayFrame(null);
+      setIsReplayAnimating(false);
+      if (readyBadgeTimerRef.current) {
+        clearTimeout(readyBadgeTimerRef.current);
+        readyBadgeTimerRef.current = null;
+      }
+      setSimulationRun({ status: "running", error: null });
 
-    const snap: LastSimulationSnapshot = {
-      overlay: streamedOverlay,
-      perimeterGeoJSON: perimeterGeoJSON ?? null,
-      weatherSource: stats.weatherSource,
-      completedAt: new Date().toISOString(),
-    };
-    setLastSimulationSnapshot(snap);
-    runReplayAnimation(streamedOverlay);
-  }, [
-    streamStatus,
-    streamedOverlay,
-    perimeterGeoJSON,
-    stats.weatherSource,
-    runReplayAnimation,
-  ]);
+      const planPayload: IgnitionPlan = {
+        ...projectConfig,
+        windSpeed: weather.windSpeed,
+        windDegree: weather.windDirection,
+        temperature: weather.temperature,
+        humidity: weather.humidity,
+        total_sim_time: simulationTimesteps,
+      };
+
+      try {
+        const res = await fetch("/api/simulation/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            plan: planPayload,
+            simulationHours: simulationTimesteps,
+            weatherOverrides,
+          }),
+        });
+        const json = (await res.json()) as {
+          error?: string;
+          operations?: unknown;
+          weatherSource?: string;
+          weatherUsed?: WeatherValues;
+          cellResolution?: number;
+          cellSpaceDimension?: number;
+          cellSpaceDimensionLat?: number;
+          projCenterLat?: number;
+          projCenterLng?: number;
+        };
+        if (!res.ok) {
+          throw new Error(json.error ?? `Simulation failed (${res.status})`);
+        }
+        if (json.weatherUsed) {
+          setWeather(mergeWeather(json.weatherUsed, weatherOverridesRef.current));
+        }
+        const overlay = normalizeOverlay(json.operations);
+        const snap: LastSimulationSnapshot = {
+          overlay,
+          perimeterGeoJSON: null,
+          gridMeta:
+            typeof json.cellResolution === "number" &&
+            typeof json.cellSpaceDimension === "number" &&
+            typeof json.cellSpaceDimensionLat === "number" &&
+            typeof json.projCenterLat === "number" &&
+            typeof json.projCenterLng === "number"
+              ? {
+                  cellResolution: json.cellResolution,
+                  cellSpaceDimension: json.cellSpaceDimension,
+                  cellSpaceDimensionLat: json.cellSpaceDimensionLat,
+                  projCenterLat: json.projCenterLat,
+                  projCenterLng: json.projCenterLng,
+                }
+              : undefined,
+          weatherSource: json.weatherSource ?? "dynamic",
+          completedAt: new Date().toISOString(),
+        };
+        setLastSimulationSnapshot(snap);
+        setSimulationRun({
+          status: "ready",
+          error: null,
+          weatherSource: json.weatherSource,
+        });
+        readyBadgeTimerRef.current = setTimeout(() => {
+          setSimulationRun((prev) =>
+            prev.status === "ready" ? { ...prev, status: "idle" } : prev,
+          );
+          readyBadgeTimerRef.current = null;
+        }, 5000);
+        runReplayAnimation(overlay);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setSimulationRun({ status: "error", error: msg });
+      }
+    },
+    [
+      projectConfig,
+      weather,
+      weatherOverrides,
+      simulationRun.status,
+      clearReplayTimers,
+      runReplayAnimation,
+    ],
+  );
 
   useEffect(() => {
     let cancelled = false;
     skipSaveAfterLoadRef.current = true;
     setHydrated(false);
     setProjectMissing(false);
+    setAgentChatSnapshot(null);
 
     (async () => {
       try {
@@ -263,13 +365,20 @@ export function ProjectWorkspace({
           }
           return;
         }
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (!cancelled) {
+            setAgentChatSnapshot({ messages: [], introDone: false });
+          }
+          return;
+        }
         const data = (await res.json()) as {
           title?: string;
           plan?: IgnitionPlan;
           weather?: WeatherValues;
           ownerSlug?: string;
           lastSimulation?: LastSimulationSnapshot | null;
+          agentChatMessages?: unknown;
+          agentChatIntroDone?: boolean;
         };
         if (cancelled) return;
 
@@ -283,8 +392,35 @@ export function ProjectWorkspace({
         if (data.plan) setProjectConfig(ensurePlanBoundary(data.plan));
         if (data.weather) setWeather({ ...DEFAULT_WEATHER, ...data.weather });
         setLastSimulationSnapshot(data.lastSimulation ?? null);
+
+        const rawChat = data.agentChatMessages;
+        const loadedMessages = Array.isArray(rawChat)
+          ? dedupeMessagesById(rawChat as UIMessage[])
+          : [];
+        if (!cancelled) {
+          setAgentChatSnapshot({
+            messages: loadedMessages,
+            introDone: Boolean(data.agentChatIntroDone),
+          });
+          const initialPayload = JSON.stringify({
+            title: data.title ?? projectTitle,
+            plan: data.plan ? ensurePlanBoundary(data.plan) : projectConfig,
+            weather: data.weather
+              ? mergeWeather(
+                  { ...DEFAULT_WEATHER, ...data.weather },
+                  weatherOverridesRef.current,
+                )
+              : weather,
+            lastSimulation: data.lastSimulation ?? null,
+            agentChatMessages: loadedMessages,
+            agentChatIntroDone: Boolean(data.agentChatIntroDone),
+          });
+          lastSavedPayloadRef.current = initialPayload;
+        }
       } catch {
-        /* keep local defaults */
+        if (!cancelled) {
+          setAgentChatSnapshot({ messages: [], introDone: false });
+        }
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -297,6 +433,10 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     lastMapPositionNavKeyRef.current = null;
+  }, [projectId]);
+
+  useEffect(() => {
+    setChatMountKey(0);
   }, [projectId]);
 
   useEffect(() => {
@@ -313,8 +453,22 @@ export function ProjectWorkspace({
 
   useEffect(() => {
     if (!hydrated) return;
+    if (agentChatSnapshot === null) return;
     if (skipSaveAfterLoadRef.current) {
       skipSaveAfterLoadRef.current = false;
+      return;
+    }
+
+    const payloadObj = {
+      title: projectTitle,
+      plan: projectConfig,
+      weather,
+      lastSimulation: lastSimulationSnapshot,
+      agentChatMessages: agentChatSnapshot.messages,
+      agentChatIntroDone: agentChatSnapshot.introDone,
+    };
+    const payloadHash = JSON.stringify(payloadObj);
+    if (lastSavedPayloadRef.current === payloadHash) {
       return;
     }
 
@@ -326,14 +480,10 @@ export function ProjectWorkspace({
           const res = await fetch(`/api/project/${projectId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: projectTitle,
-              plan: projectConfig,
-              weather,
-              lastSimulation: lastSimulationSnapshot,
-            }),
+            body: payloadHash,
           });
           if (!res.ok) throw new Error("save failed");
+          lastSavedPayloadRef.current = payloadHash;
           setSaveStatus("saved");
           if (savedClearRef.current) clearTimeout(savedClearRef.current);
           savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
@@ -346,11 +496,20 @@ export function ProjectWorkspace({
     return () => {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     };
-  }, [hydrated, projectConfig, weather, projectTitle, projectId, lastSimulationSnapshot]);
+  }, [
+    hydrated,
+    projectConfig,
+    weather,
+    projectTitle,
+    projectId,
+    lastSimulationSnapshot,
+    agentChatSnapshot,
+  ]);
 
   useEffect(() => {
     return () => {
       if (savedClearRef.current) clearTimeout(savedClearRef.current);
+      if (readyBadgeTimerRef.current) clearTimeout(readyBadgeTimerRef.current);
     };
   }, []);
 
@@ -375,28 +534,59 @@ export function ProjectWorkspace({
     });
   }, []);
 
-  const isSimulating = streamStatus === "open";
+  const streamStatusForPanel =
+    simulationRun.status === "running"
+      ? "open"
+      : simulationRun.status === "error"
+        ? "error"
+        : "closed";
+
+  const isSimulating = simulationRun.status === "running";
+  const isSimulationReady = simulationRun.status === "ready";
+  const activeTerrainLayer =
+    terrainState.show.has("fuel")
+      ? "fuel"
+      : terrainState.show.has("slope")
+        ? "slope"
+        : terrainState.show.has("aspect")
+          ? "aspect"
+          : null;
 
   const panelStats = useMemo(
     () => ({
       ...statsFromOverlay(effectiveOverlay),
       weatherSource:
-        streamStatus === "open"
-          ? stats.weatherSource
-          : lastSimulationSnapshot?.weatherSource ?? stats.weatherSource,
-      streamStatus,
+        lastSimulationSnapshot?.weatherSource ?? simulationRun.weatherSource,
+      streamStatus: streamStatusForPanel,
       shapes: drawnShapes.length,
+      simulationError: simulationRun.error,
     }),
     [
       effectiveOverlay,
-      streamStatus,
-      stats.weatherSource,
-      lastSimulationSnapshot,
+      lastSimulationSnapshot?.weatherSource,
+      simulationRun.weatherSource,
+      simulationRun.error,
+      streamStatusForPanel,
       drawnShapes.length,
     ],
   );
 
   const handleSetupUpdate = useCallback((update: SetupUpdate) => {
+    if (
+      update.field === "cellResolution" ||
+      update.field === "cellSpaceDimension" ||
+      update.field === "cellSpaceDimensionLat"
+    ) {
+      const v = Number(update.value);
+      if (Number.isNaN(v)) return;
+      const key = update.field;
+      setProjectConfig((prev) => ({
+        ...prev,
+        [key]: Math.max(1, Math.round(v)),
+      }));
+      return;
+    }
+
     const v = Number(update.value);
     if (Number.isNaN(v)) return;
     const weatherFields: Record<string, keyof WeatherValues> = {
@@ -441,6 +631,7 @@ export function ProjectWorkspace({
   }, []);
 
   const resetProject = useCallback(() => {
+    const nextIntroDone = agentChatSnapshot?.introDone ?? false;
     clearReplayTimers();
     setReplayFrame(null);
     setIsReplayAnimating(false);
@@ -451,14 +642,18 @@ export function ProjectWorkspace({
     setInteractionHint(null);
     setProjectConfig(defaultIgnitionPlan());
     setWeather({ ...DEFAULT_WEATHER });
+    setWeatherOverrides({});
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
     setDrawnShapes([]);
     setLastSimulationSnapshot(null);
     setLocationSearchPreview(null);
-    setSimulationId(null);
+    setSimulationRun({ status: "idle", error: null });
     setMapInteractionMode(null);
     pendingActionRef.current = null;
     pendingPolygonRef.current = [];
+
+    setChatMountKey((k) => k + 1);
+    setAgentChatSnapshot({ messages: [], introDone: nextIntroDone });
 
     setSaveStatus("saving");
     void (async () => {
@@ -476,9 +671,19 @@ export function ProjectWorkspace({
             plan,
             weather: DEFAULT_WEATHER,
             lastSimulation: null,
+            agentChatMessages: [],
+            agentChatIntroDone: nextIntroDone,
           }),
         });
         if (!res.ok) throw new Error("reset save failed");
+        lastSavedPayloadRef.current = JSON.stringify({
+          title: nextTitle,
+          plan,
+          weather: DEFAULT_WEATHER,
+          lastSimulation: null,
+          agentChatMessages: [],
+          agentChatIntroDone: nextIntroDone,
+        });
         setSaveStatus("saved");
         if (savedClearRef.current) clearTimeout(savedClearRef.current);
         savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
@@ -486,7 +691,7 @@ export function ProjectWorkspace({
         setSaveStatus("error");
       }
     })();
-  }, [projectId, clearReplayTimers]);
+  }, [projectId, clearReplayTimers, agentChatSnapshot]);
 
   useEffect(() => {
     if (!mapInteractionMode) setInteractionHint(null);
@@ -511,6 +716,7 @@ export function ProjectWorkspace({
     (latlng: import("leaflet").LatLng) => {
       const mode = mapInteractionMode;
       if (mode === "polygon") return true;
+      if (mode === "polyline" && pendingActionRef.current === "fuel-break") return true;
       if (mode === "rect" && pendingActionRef.current === "location") return true;
       const b = projectConfig.boundaryGeoJSON;
       if (!b) return true;
@@ -520,6 +726,8 @@ export function ProjectWorkspace({
   );
 
   const hasProjectLocation = !!projectConfig.boundaryGeoJSON;
+  const ignitionSegmentCount = projectConfig.team_infos[0]?.details.length ?? 0;
+  const runActionsEnabled = hasProjectLocation && ignitionSegmentCount > 0;
 
   const handlePin = useCallback((latlng: import("leaflet").LatLng) => {
     const b = projectConfig.boundaryGeoJSON;
@@ -565,15 +773,25 @@ export function ProjectWorkspace({
     });
     const s = toGrid(start);
     const e = toGrid(end);
-    const payload: ActionPayload = {
-      action: "line-ignition",
-      start_x: s.x,
-      start_y: s.y,
-      end_x: e.x,
-      end_y: e.y,
-      speed: 0.6,
-      mode: "continuous_static",
-    };
+    const payload: ActionPayload =
+      pendingActionRef.current === "fuel-break"
+        ? {
+            action: "fuel-break",
+            x1: Math.min(s.x, e.x),
+            y1: Math.min(s.y, e.y),
+            x2: Math.max(s.x, e.x),
+            y2: Math.max(s.y, e.y),
+          }
+        : {
+            action: "line-ignition",
+            start_x: s.x,
+            start_y: s.y,
+            end_x: e.x,
+            end_y: e.y,
+            speed: 0.6,
+            mode: "continuous_static",
+          };
+    pendingActionRef.current = null;
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     setMapInteractionMode(null);
   }, [projectConfig, pushInteractionHint]);
@@ -607,37 +825,6 @@ export function ProjectWorkspace({
       };
       setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
       setLocationSearchPreview(null);
-    } else {
-      const b = projectConfig.boundaryGeoJSON;
-      if (
-        b &&
-        (!pointInBoundary(corner1.lat, corner1.lng, b) ||
-          !pointInBoundary(corner2.lat, corner2.lng, b))
-      ) {
-        pushInteractionHint();
-        setMapInteractionMode(null);
-        return;
-      }
-      const cellRes = projectConfig.cellResolution;
-      const cx = projectConfig.proj_center_lng;
-      const cy = projectConfig.proj_center_lat;
-      const metersPerDeg = 111320;
-      const cosLat = Math.cos((cy * Math.PI) / 180);
-      const toGrid = (ll: import("leaflet").LatLng) => ({
-        x: Math.round(((ll.lng - cx) * metersPerDeg * cosLat) / cellRes + projectConfig.cellSpaceDimension / 2),
-        y: Math.round(((ll.lat - cy) * metersPerDeg) / cellRes + projectConfig.cellSpaceDimensionLat / 2),
-      });
-      const g1 = toGrid(corner1);
-      const g2 = toGrid(corner2);
-      const payload: ActionPayload = {
-        action: "fuel-break",
-        x1: Math.min(g1.x, g2.x),
-        y1: Math.min(g1.y, g2.y),
-        x2: Math.max(g1.x, g2.x),
-        y2: Math.max(g1.y, g2.y),
-        splitIntoRectangleEdges: true,
-      };
-      setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     }
     setMapInteractionMode(null);
   }, [projectConfig, pushInteractionHint]);
@@ -710,6 +897,10 @@ export function ProjectWorkspace({
             ? "Draw two opposite corners for your project area. Green shows your search—your rectangle sets the simulation boundary."
             : "Draw two opposite corners for your project working area.",
         );
+      } else if (mode === "polyline" && action === "fuel-break") {
+        setInteractionHint("Click nodes for the fuel-break path, then press Escape to finish.");
+      } else if (mode === "line" && action === "fuel-break") {
+        setInteractionHint("Click start point, then end point to place a fuel-break segment.");
       }
     },
     [locationSearchPreview],
@@ -762,7 +953,32 @@ export function ProjectWorkspace({
     );
   }
 
+  if (agentChatSnapshot === null) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-[#0f0f0f] text-sm text-white/40">
+        Loading…
+      </main>
+    );
+  }
+
   return (
+    <ProjectAgentChatHost
+      key={`${projectId}-${chatMountKey}`}
+      projectId={projectId}
+      initialMessages={agentChatSnapshot.messages}
+      introDoneServer={agentChatSnapshot.introDone}
+      onPersist={handleAgentChatPersist}
+      onIntroClaimed={handleAgentIntroClaimed}
+    >
+      {({
+        messages,
+        sendMessage,
+        status,
+        showStarterPrompt,
+        starterPromptText,
+        sendStarterPrompt,
+        dismissStarterPrompt,
+      }) => (
     <main className="flex h-screen flex-col overflow-hidden bg-[#0f0f0f] text-white">
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-[#141414] px-3 sm:h-12 sm:px-4">
         <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
@@ -809,18 +1025,43 @@ export function ProjectWorkspace({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {terrainState.loading && (
+            <span className="flex items-center gap-1 rounded-full border border-sky-500/35 bg-sky-500/15 px-2 py-0.5 text-[9px] font-medium text-sky-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
+              <span className="h-1 w-1 animate-pulse rounded-full bg-sky-300 sm:h-1.5 sm:w-1.5" />
+              <span className="hidden sm:inline">
+                Fetching terrain{activeTerrainLayer ? ` (${activeTerrainLayer})` : ""}
+              </span>
+              <span className="sm:hidden">Terrain</span>
+            </span>
+          )}
+          {!terrainState.loading && activeTerrainLayer && terrainState.data[activeTerrainLayer] && (
+            <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
+              <span className="h-1 w-1 rounded-full bg-emerald-300 sm:h-1.5 sm:w-1.5" />
+              <span className="hidden sm:inline">Terrain ready ({activeTerrainLayer})</span>
+              <span className="sm:hidden">T ready</span>
+            </span>
+          )}
           {isSimulating && (
+            <span className="flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/15 px-2 py-0.5 text-[9px] font-medium text-amber-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
+              <span className="h-1 w-1 animate-pulse rounded-full bg-amber-300 sm:h-1.5 sm:w-1.5" />
+              <span className="hidden sm:inline">Processing simulation</span>
+              <span className="sm:hidden">Processing</span>
+            </span>
+          )}
+          {isSimulationReady && (
             <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-400 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
-              <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-400 sm:h-1.5 sm:w-1.5" />
-              <span className="hidden sm:inline">Simulation Running</span>
-              <span className="sm:hidden">Running</span>
+              <span className="h-1 w-1 rounded-full bg-emerald-400 sm:h-1.5 sm:w-1.5" />
+              <span className="hidden sm:inline">Simulation Ready</span>
+              <span className="sm:hidden">Ready</span>
             </span>
           )}
           <button
             type="button"
             title="Play saved simulation"
             disabled={
-              !lastSimulationSnapshot || isReplayAnimating || streamStatus === "open"
+              !lastSimulationSnapshot ||
+              isReplayAnimating ||
+              simulationRun.status === "running"
             }
             onClick={() => {
               if (lastSimulationSnapshot) {
@@ -862,11 +1103,25 @@ export function ProjectWorkspace({
           terrainData={terrainState.data}
           terrainShow={terrainState.show}
           showCellInfo={terrainState.showCellInfo}
-          cellResolution={projectConfig.cellResolution}
-          cellSpaceDimension={projectConfig.cellSpaceDimension}
-          cellSpaceDimensionLat={projectConfig.cellSpaceDimensionLat}
-          projCenterLat={projectConfig.proj_center_lat}
-          projCenterLng={projectConfig.proj_center_lng}
+          cellResolution={
+            lastSimulationSnapshot?.gridMeta?.cellResolution ?? projectConfig.cellResolution
+          }
+          cellSpaceDimension={
+            lastSimulationSnapshot?.gridMeta?.cellSpaceDimension ??
+            projectConfig.cellSpaceDimension
+          }
+          cellSpaceDimensionLat={
+            lastSimulationSnapshot?.gridMeta?.cellSpaceDimensionLat ??
+            projectConfig.cellSpaceDimensionLat
+          }
+          projCenterLat={
+            lastSimulationSnapshot?.gridMeta?.projCenterLat ??
+            projectConfig.proj_center_lat
+          }
+          projCenterLng={
+            lastSimulationSnapshot?.gridMeta?.projCenterLng ??
+            projectConfig.proj_center_lng
+          }
         />
 
         <FireOverlay points={effectiveOverlay} />
@@ -880,11 +1135,12 @@ export function ProjectWorkspace({
             centerSet: hasProjectLocation,
           }}
           hasProjectLocation={hasProjectLocation}
-          onStartSimulation={() => {
-            clearReplayTimers();
-            setReplayFrame(null);
-            setIsReplayAnimating(false);
-            setSimulationId(toSimulationQuery(mapBounds));
+          runActionsEnabled={runActionsEnabled}
+          onStartSimulation={(timesteps) => {
+            void handleStartSimulation(timesteps);
+          }}
+          onCommitPlanGridField={(field, value) => {
+            setProjectConfig((prev) => ({ ...prev, [field]: value }));
           }}
           onAskAgent={async () => {
             const latest = [...messages].reverse().find((m) => m.role === "assistant");
@@ -897,8 +1153,23 @@ export function ProjectWorkspace({
           }}
           onResetProject={resetProject}
           weather={weather}
-          onWeatherOverride={(field, value) => setWeather((prev) => ({ ...prev, [field]: value }))}
-          onWeatherFetched={(next) => setWeather(next)}
+          onWeatherOverride={(field, value) => {
+            setWeather((prev) => ({ ...prev, [field]: value }));
+            setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+          }}
+          onWeatherFetched={(next) => {
+            setWeather(mergeWeather(next, weatherOverridesRef.current));
+          }}
+          onWeatherFetchedAtCoords={(next, coords) => {
+            setWeather(mergeWeather(next, weatherOverridesRef.current));
+            const payload: ActionPayload = {
+              action: "location",
+              proj_center_lng: coords.lng,
+              proj_center_lat: coords.lat,
+            };
+            setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+            setLocationSearchPreview(null);
+          }}
           onActionConfirm={handleActionConfirm}
           onLocationSearchPreview={setLocationSearchPreview}
           onRequestMapInteraction={handleRequestMapInteraction}
@@ -911,6 +1182,7 @@ export function ProjectWorkspace({
           onFuelBreakDelete={handleFuelBreakDelete}
           terrainState={terrainState}
           onTerrainChange={handleTerrainChange}
+          simulationRunning={simulationRun.status === "running"}
         />
 
         <MapInteractionHUD
@@ -927,9 +1199,15 @@ export function ProjectWorkspace({
             status={status}
             sendMessage={sendMessage}
             onSetupUpdate={handleSetupUpdate}
+            showStarterPrompt={showStarterPrompt}
+            starterPromptText={starterPromptText}
+            onSendStarterPrompt={sendStarterPrompt}
+            onDismissStarterPrompt={dismissStarterPrompt}
           />
         </div>
       </div>
     </main>
+      )}
+    </ProjectAgentChatHost>
   );
 }
