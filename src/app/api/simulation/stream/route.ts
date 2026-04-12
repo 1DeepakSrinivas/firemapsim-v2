@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 
-import { getSession } from "@/lib/auth";
+import { upsertLocalUserFromClerk } from "@/lib/user-store";
 import { mastra } from "@/mastra";
 import type { SimulateWorkflowInput } from "@/mastra/workflows/simulate";
 
@@ -29,15 +30,27 @@ function parseQueryAsInput(searchParams: URLSearchParams): SimulateWorkflowInput
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
-  if (!session?.user?.id) {
+  const { userId } = await auth();
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const clerkUser = await currentUser();
+  await upsertLocalUserFromClerk({
+    clerkUserId: userId,
+    username: clerkUser?.username ?? null,
+    email: clerkUser?.primaryEmailAddress?.emailAddress ?? null,
+    name:
+      [clerkUser?.firstName, clerkUser?.lastName]
+        .filter(Boolean)
+        .join(" ") || clerkUser?.username || null,
+    imageUrl: clerkUser?.imageUrl ?? null,
+  });
 
   try {
     const input = parseQueryAsInput(request.nextUrl.searchParams);
     const workflow = mastra.getWorkflow("simulateWorkflow");
-    const run = await workflow.createRun({ resourceId: session.user.id });
+    const run = await workflow.createRun({ resourceId: userId });
     const output = run.stream({ inputData: input, closeOnSuspend: true });
 
     const encoder = new TextEncoder();
