@@ -1,17 +1,33 @@
-import { NextRequest, NextResponse } from "next/server";
+import { handleChatStream } from "@mastra/ai-sdk";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import { NextRequest, NextResponse } from "next/server";
 import z from "zod";
 
 import { mastra } from "@/mastra";
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
 
-const requestSchema = z.object({
-  prompt: z.string().min(1).optional(),
-  messages: z.array(z.unknown()).optional(),
-  threadId: z.string().min(1).optional(),
-});
+const requestSchema = z
+  .object({
+    prompt: z.string().min(1).optional(),
+    messages: z.array(z.unknown()).optional(),
+    threadId: z.string().min(1).optional(),
+    trigger: z.string().optional(),
+    messageId: z.string().optional(),
+    id: z.string().optional(),
+  })
+  .passthrough();
 
 export const runtime = "nodejs";
+
+function parseChatTrigger(
+  value: string | undefined,
+): "submit-message" | "regenerate-message" | undefined {
+  if (value === "submit-message" || value === "regenerate-message") {
+    return value;
+  }
+  return undefined;
+}
 
 export async function POST(request: NextRequest) {
   const { userId } = await auth();
@@ -33,37 +49,48 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = requestSchema.parse(await request.json());
-    const input = body.messages && body.messages.length > 0 ? body.messages : body.prompt;
 
-    if (!input) {
+    let messages = body.messages as UIMessage[] | undefined;
+    if (!messages?.length && body.prompt) {
+      messages = [
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          parts: [{ type: "text", text: body.prompt }],
+        },
+      ];
+    }
+
+    if (!messages?.length) {
       return NextResponse.json(
         { error: "Provide either messages[] or prompt." },
         { status: 400 },
       );
     }
 
-    const agent = mastra.getAgent("fireSimAgent");
-    const stream = await agent.stream(input as any, {
-      memory: {
-        thread: body.threadId ?? `thread-${crypto.randomUUID()}`,
-        resource: userId,
+    const thread = body.threadId ?? `thread-${crypto.randomUUID()}`;
+
+    const uiStream = await handleChatStream({
+      mastra,
+      agentId: "firesim-agent",
+      version: "v6",
+      params: {
+        messages,
+        trigger: parseChatTrigger(body.trigger),
+      },
+      defaultOptions: {
+        memory: {
+          thread,
+          resource: userId,
+        },
       },
     });
 
-    const dataStreamResponse = (stream as any).toDataStreamResponse;
-    if (typeof dataStreamResponse === "function") {
-      return dataStreamResponse.call(stream);
-    }
-
-    const textStreamResponse = (stream as any).toTextStreamResponse;
-    if (typeof textStreamResponse === "function") {
-      return textStreamResponse.call(stream);
-    }
-
-    return NextResponse.json(
-      { error: "Streaming response adapter not available." },
-      { status: 500 },
-    );
+    return createUIMessageStreamResponse({
+      stream: uiStream as Parameters<
+        typeof createUIMessageStreamResponse
+      >[0]["stream"],
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
