@@ -12,6 +12,11 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import type { BoundaryGeoJSON } from "@/types/ignitionPlan";
+import {
+  aspectColorForCell,
+  fuelColorForCell,
+  slopeColorForCell,
+} from "@/lib/terrainLegend";
 import type { TerrainData, TerrainLayer } from "./MapOverlayPanels";
 
 import type {
@@ -202,7 +207,21 @@ function MapEventsBridge({
   return null;
 }
 
-function FireCircles({ points }: { points: FireOverlayPoint[] }) {
+function FireCircles({
+  points,
+  cellResolution,
+  cellSpaceDimension,
+  cellSpaceDimensionLat,
+  projCenterLat,
+  projCenterLng,
+}: {
+  points: FireOverlayPoint[];
+  cellResolution?: number;
+  cellSpaceDimension?: number;
+  cellSpaceDimensionLat?: number;
+  projCenterLat?: number;
+  projCenterLng?: number;
+}) {
   const map = useMap();
   const bounds = map.getBounds();
   const west = bounds.getWest();
@@ -210,12 +229,30 @@ function FireCircles({ points }: { points: FireOverlayPoint[] }) {
   const east = bounds.getEast();
   const north = bounds.getNorth();
 
+  const canUseGridMapping =
+    typeof cellResolution === "number" &&
+    cellResolution > 0 &&
+    typeof cellSpaceDimension === "number" &&
+    cellSpaceDimension > 0 &&
+    typeof cellSpaceDimensionLat === "number" &&
+    cellSpaceDimensionLat > 0 &&
+    typeof projCenterLat === "number" &&
+    typeof projCenterLng === "number";
+
   const normalized = useMemo(() => {
+    const metersPerDeg = 111320;
+    const cosLat = Math.cos((((projCenterLat ?? 0) * Math.PI) / 180));
+
     return points.map((point, index) => {
       let lat = point.y;
       let lng = point.x;
 
-      if (Math.abs(point.x) > 180 || Math.abs(point.y) > 90) {
+      if (canUseGridMapping && Math.abs(cosLat) > 1e-9) {
+        const dxMeters = (point.x - (cellSpaceDimension! / 2)) * cellResolution!;
+        const dyMeters = (point.y - (cellSpaceDimensionLat! / 2)) * cellResolution!;
+        lng = projCenterLng! + dxMeters / (metersPerDeg * cosLat);
+        lat = projCenterLat! + dyMeters / metersPerDeg;
+      } else if (Math.abs(point.x) > 180 || Math.abs(point.y) > 90) {
         const xNorm = Math.min(Math.max(point.x / 100, 0), 1);
         const yNorm = Math.min(Math.max(point.y / 100, 0), 1);
         lng = west + (east - west) * xNorm;
@@ -229,7 +266,19 @@ function FireCircles({ points }: { points: FireOverlayPoint[] }) {
         state: point.state,
       };
     });
-  }, [east, north, points, south, west]);
+  }, [
+    canUseGridMapping,
+    cellResolution,
+    cellSpaceDimension,
+    cellSpaceDimensionLat,
+    east,
+    north,
+    points,
+    projCenterLat,
+    projCenterLng,
+    south,
+    west,
+  ]);
 
   return (
     <>
@@ -250,33 +299,7 @@ function FireCircles({ points }: { points: FireOverlayPoint[] }) {
   );
 }
 
-// ─── Terrain overlay helpers ──────────────────────────────────────────────────
-
-/** Maps a fuel model number to a display color */
-function fuelColor(v: number): string {
-  if (v <= 0) return "transparent";
-  if (v <= 3) return "rgba(134,239,172,0.45)";   // light green — grass
-  if (v <= 7) return "rgba(234,179,8,0.45)";     // yellow — shrub
-  if (v <= 13) return "rgba(249,115,22,0.45)";   // orange — timber
-  return "rgba(239,68,68,0.45)";                  // red — slash
-}
-
-/** Maps a slope value (degrees) to a color */
-function slopeColor(v: number): string {
-  if (v <= 0) return "transparent";
-  const t = Math.min(v / 60, 1);
-  const r = Math.round(59 + t * 196);
-  const g = Math.round(130 - t * 130);
-  const b = Math.round(246 - t * 246);
-  return `rgba(${r},${g},${b},0.45)`;
-}
-
-/** Maps an aspect value (degrees 0-360) to a color (compass hue) */
-function aspectColor(v: number): string {
-  if (v < 0) return "transparent";
-  const hue = Math.round(v) % 360;
-  return `hsla(${hue},70%,55%,0.4)`;
-}
+// ─── Terrain overlay (colors from @/lib/terrainLegend) ───────────────────────
 
 type TerrainOverlayLayerProps = {
   data: TerrainData;
@@ -333,9 +356,9 @@ function TerrainOverlayLayer({
       if (!matrix) return;
 
       const colorFn =
-        show.has("fuel") && data.fuel ? fuelColor :
-        show.has("slope") && data.slope ? slopeColor :
-        aspectColor;
+        show.has("fuel") && data.fuel ? fuelColorForCell :
+        show.has("slope") && data.slope ? slopeColorForCell :
+        aspectColorForCell;
 
       const rows = matrix.length;
       const cols = matrix[0]?.length ?? 0;
@@ -520,7 +543,7 @@ export default function FireMapClient({
         {locationSearchPreview && !boundaryGeoJSON && (
           <LocationSearchPreviewLayer preview={locationSearchPreview} />
         )}
-        {terrainData && terrainShow && terrainShow.size > 0 && projCenterLat !== 0 && (
+        {terrainData && terrainShow && terrainShow.size > 0 && (
           <TerrainOverlayLayer
             data={terrainData}
             show={terrainShow}
@@ -531,7 +554,7 @@ export default function FireMapClient({
             projCenterLng={projCenterLng}
           />
         )}
-        {showCellInfo && terrainData && terrainShow && terrainShow.size > 0 && projCenterLat !== 0 && (
+        {showCellInfo && terrainData && terrainShow && terrainShow.size > 0 && (
           <CellInfoCursor
             data={terrainData}
             show={terrainShow}
@@ -542,7 +565,14 @@ export default function FireMapClient({
             projCenterLng={projCenterLng}
           />
         )}
-        <FireCircles points={fireOverlay} />
+        <FireCircles
+          points={fireOverlay}
+          cellResolution={cellResolution}
+          cellSpaceDimension={cellSpaceDimension}
+          cellSpaceDimensionLat={cellSpaceDimensionLat}
+          projCenterLat={projCenterLat}
+          projCenterLng={projCenterLng}
+        />
         <MapInteractionLayer
           mode={interactionMode ?? null}
           onPin={onPin}

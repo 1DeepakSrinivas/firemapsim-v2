@@ -7,6 +7,7 @@
  *   pin        — single click places a marker; fires onPin(latlng)
  *   line       — two clicks define start/end; fires onLine(start, end)
  *   polygon    — click to add nodes, double-click to close; fires onPolygon(latlngs)
+ *   polyline   — click to add nodes, press Escape to commit; fires onPolyline(latlngs)
  */
 
 import { useEffect, useRef } from "react";
@@ -284,6 +285,19 @@ export function MapInteractionLayer({
         polylinePreviewRef.current = null;
       }
 
+      function handlePolylineEscape(e: KeyboardEvent) {
+        if (mode !== "polyline") return;
+        if (e.key !== "Escape") return;
+        e.preventDefault();
+        const nodes = polylineNodesRef.current;
+        if (nodes.length >= 2) {
+          handlePolylineDblClick();
+        } else {
+          clearAll();
+          onCancel?.();
+        }
+      }
+
       // ── Rect mode ─────────────────────────────────────────────────────────
       function handleRectClick(e: import("leaflet").LeafletMouseEvent) {
         if (!rectCorner1Ref.current) {
@@ -345,8 +359,8 @@ export function MapInteractionLayer({
       } else if (mode === "polyline") {
         map.on("click", handlePolylineClick);
         map.on("mousemove", handlePolylineMouseMove);
-        map.on("dblclick", handlePolylineDblClick);
         map.doubleClickZoom.disable();
+        window.addEventListener("keydown", handlePolylineEscape);
       } else if (mode === "rect") {
         map.on("click", handleRectClick);
         map.on("mousemove", handleRectMouseMove);
@@ -362,6 +376,7 @@ export function MapInteractionLayer({
         map.off("click", handlePolylineClick);
         map.off("mousemove", handlePolylineMouseMove);
         map.off("dblclick", handlePolylineDblClick);
+        window.removeEventListener("keydown", handlePolylineEscape);
         map.doubleClickZoom.enable();
         map.off("click", handleRectClick);
         map.off("mousemove", handleRectMouseMove);

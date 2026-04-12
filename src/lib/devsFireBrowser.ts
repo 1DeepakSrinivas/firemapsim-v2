@@ -1,7 +1,9 @@
 /**
  * Browser-side DEVS-FIRE calls via `/api/devs-fire` proxy.
- * Per API docs, almost all endpoints require `userToken` from `connectToServer` first,
- * and the grid should be positioned with `setMultiParameters` before `getCellFuel` / etc.
+ * Sequence mirrors `runDevsFireFromPlan`: connect → setMultiParameters → setCellSpaceLocation →
+ * setWindCondition, then getCellFuel / getCellSlope / getCellAspect.
+ * GSU docs: “If using the online fuel data, then the location must be picked” via
+ * `setCellSpaceLocation` before terrain matrices are valid.
  *
  * @see https://sims.cs.gsu.edu/sims/research/API_usage.html
  */
@@ -53,22 +55,49 @@ export async function connectDevsFire(): Promise<string> {
   return parseUserToken(data);
 }
 
+/** WGS84 center for DEVS-FIRE query params; uses polygon centroid if plan center is still at origin. */
+export function effectiveDevsFireLatLng(plan: IgnitionPlan): { lat: number; lng: number } {
+  if (Math.abs(plan.proj_center_lat) > 1e-8 || Math.abs(plan.proj_center_lng) > 1e-8) {
+    return { lat: plan.proj_center_lat, lng: plan.proj_center_lng };
+  }
+  const b = plan.boundaryGeoJSON;
+  if (b?.type === "Polygon") {
+    const ring = b.coordinates[0];
+    if (ring && ring.length >= 3) {
+      const n = ring.length - 1;
+      let slat = 0;
+      let slng = 0;
+      for (let i = 0; i < n; i++) {
+        const [lng, lat] = ring[i]!;
+        slat += lat;
+        slng += lng;
+      }
+      if (n > 0) {
+        return { lat: slat / n, lng: slng / n };
+      }
+    }
+  }
+  return { lat: plan.proj_center_lat, lng: plan.proj_center_lng };
+}
+
 /** Aligns the server-side grid with the current project + weather (required before terrain matrices are meaningful). */
 export async function setDevsFireMultiParameters(
   token: string,
   plan: IgnitionPlan,
   weather: WeatherValues,
 ): Promise<void> {
+  const { lat, lng } = effectiveDevsFireLatLng(plan);
+  const cellDimension = Math.max(plan.cellSpaceDimension, plan.cellSpaceDimensionLat);
   await postDevsFireProxy({
     path: "/setMultiParameters/",
     token,
     params: {
-      lat: plan.proj_center_lat,
-      lng: plan.proj_center_lng,
+      lat,
+      lng,
       windSpeed: weather.windSpeed,
       windDirection: weather.windDirection,
       cellResolution: plan.cellResolution,
-      cellDimension: plan.cellSpaceDimension,
+      cellDimension,
     },
   });
 }
@@ -92,7 +121,29 @@ export async function bootstrapTerrainSession(
   plan: IgnitionPlan,
   weather: WeatherValues,
 ): Promise<string> {
+  const { lat, lng } = effectiveDevsFireLatLng(plan);
+  if (Math.abs(lat) < 1e-8 && Math.abs(lng) < 1e-8) {
+    throw new Error(
+      "Set a project location (map center) before fetching terrain — DEVS-FIRE needs a US lat/lng.",
+    );
+  }
+
   const token = await connectDevsFire();
   await setDevsFireMultiParameters(token, plan, weather);
+
+  await postDevsFireProxy({
+    path: "/setCellSpaceLocation/",
+    token,
+    params: { lat, lng },
+  });
+  await postDevsFireProxy({
+    path: "/setWindCondition/",
+    token,
+    params: {
+      windSpeed: weather.windSpeed,
+      windDirection: weather.windDirection,
+    },
+  });
+
   return token;
 }

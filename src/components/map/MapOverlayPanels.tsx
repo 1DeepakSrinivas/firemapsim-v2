@@ -22,6 +22,12 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 
+import {
+  ASPECT_LEGEND_CAPTION,
+  FUEL_LEGEND_STOPS,
+  SLOPE_LEGEND_STOPS,
+  activeTerrainLayer,
+} from "@/lib/terrainLegend";
 import { cn } from "@/lib/utils";
 import {
   bootstrapTerrainSession,
@@ -39,7 +45,6 @@ import type { MapInteractionMode } from "./MapInteractionLayer";
 
 import { ActionModal, type ActionId, MAP_INTERACTION_ACTIONS } from "./ActionModal";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,12 +56,61 @@ export type SimStats = {
   weatherSource?: string;
   streamStatus: string;
   shapes: number;
+  simulationError?: string | null;
 };
 
 export type MapStyleId = "terrain" | "street" | "satellite";
 
 type DrawerId = "scenario";
-
+function TerrainAccordionSection({
+  open,
+  onToggle,
+  icon: Icon,
+  label,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-t border-white/6 first:border-t-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors sm:px-3 sm:py-2.5",
+          open ? "text-white" : "text-white/50 hover:text-white/80",
+        )}
+      >
+        <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+        <span className="flex-1 text-[10px] font-semibold tracking-wide sm:text-[11px]">{label}</span>
+        <ChevronRight
+          className={cn(
+            "h-2.5 w-2.5 shrink-0 text-white/25 transition-transform duration-200 sm:h-3 sm:w-3",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="px-2.5 pb-2.5 sm:px-3 sm:pb-3">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -230,20 +284,59 @@ function InlineEdit({
 
 // ─── Progress panel ───────────────────────────────────────────────────────────
 
-function ProgressPanel({ stats }: { stats?: SimStats }) {
+function TerrainLegendBlock({ terrainState }: { terrainState?: TerrainOverlayState }) {
+  const layer = terrainState ? activeTerrainLayer(terrainState.show) : null;
+  if (!layer || !terrainState?.show.size) return null;
+
+  const stops =
+    layer === "fuel" ? FUEL_LEGEND_STOPS :
+    layer === "slope" ? SLOPE_LEGEND_STOPS :
+    null;
+
+  return (
+    <div className="mt-2 border-t border-white/6 pt-2 sm:mt-2.5 sm:pt-2.5">
+      <p className="mb-1 text-[8px] font-semibold uppercase tracking-wider text-white/35 sm:text-[9px]">
+        Terrain legend ({layer})
+      </p>
+      {stops ? (
+        <div className="flex flex-wrap gap-1.5">
+          {stops.map((s) => (
+            <div key={s.label} className="flex items-center gap-1">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm border border-white/10"
+                style={{ background: s.color === "transparent" ? "transparent" : s.color }}
+              />
+              <span className="text-[8px] text-white/45 sm:text-[9px]">{s.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[8px] leading-snug text-white/40 sm:text-[9px]">{ASPECT_LEGEND_CAPTION}</p>
+      )}
+    </div>
+  );
+}
+
+function ProgressPanel({
+  stats,
+  terrainState,
+}: {
+  stats?: SimStats;
+  terrainState?: TerrainOverlayState;
+}) {
   const isActive = stats?.streamStatus === "open";
 
   return (
-    <Panel>
+    <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
       <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
         <Activity className="h-3 w-3 text-white/40 sm:h-3.5 sm:w-3.5" />
         <span className="flex-1 text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
           Simulation Progress
         </span>
         {isActive && (
-          <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-400 sm:text-[9px]">
-            <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-400" />
-            Live
+          <span className="flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[8px] font-semibold text-amber-300 sm:text-[9px]">
+            <span className="h-1 w-1 animate-pulse rounded-full bg-amber-300" />
+            Processing
           </span>
         )}
       </div>
@@ -268,6 +361,12 @@ function ProgressPanel({ stats }: { stats?: SimStats }) {
             Source: <span className="text-white/40">{stats.weatherSource}</span>
           </p>
         )}
+        {stats?.simulationError ? (
+          <p className="mt-1.5 text-[9px] leading-snug text-red-400/90 sm:mt-2 sm:text-[10px]">
+            {stats.simulationError}
+          </p>
+        ) : null}
+        <TerrainLegendBlock terrainState={terrainState} />
       </div>
     </Panel>
   );
@@ -279,12 +378,17 @@ function RunConfigPanel({
   onStartSimulation,
   onAskAgent,
   onResetProject,
+  runActionsEnabled,
+  simulationRunning,
 }: {
-  onStartSimulation?: () => void;
+  onStartSimulation?: (simulationTimesteps: number) => void;
   onAskAgent?: () => void;
   onResetProject?: () => void;
+  /** Boundary set and at least one ignition (required to run or reset from this panel) */
+  runActionsEnabled: boolean;
+  simulationRunning?: boolean;
 }) {
-  const [hours, setHours] = useState(24);
+  const [timesteps, setTimesteps] = useState(24);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [resetOpen, setResetOpen] = useState(false);
 
@@ -297,21 +401,21 @@ function RunConfigPanel({
         </span>
       </div>
       <div className="space-y-2.5 p-2.5 sm:space-y-3 sm:p-3">
-        {/* Hours stepper */}
+        {/* Timesteps stepper */}
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-white/40 sm:text-[11px]">Sim hours</span>
+          <span className="text-[10px] text-white/40 sm:text-[11px]">Timesteps</span>
           <div className="flex items-center gap-1 sm:gap-1.5">
             <button
               type="button"
-              onClick={() => setHours((h) => Math.max(1, h - 1))}
+              onClick={() => setTimesteps((h) => Math.max(1, h - 1))}
               className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
             >
               <Minus className="h-2.5 w-2.5" />
             </button>
-            <span className="w-7 text-center text-[10px] font-semibold text-white/80 sm:w-8 sm:text-[11px]">{hours}h</span>
+            <span className="w-8 text-center text-[10px] font-semibold text-white/80 sm:w-9 sm:text-[11px]">{timesteps}</span>
             <button
               type="button"
-              onClick={() => setHours((h) => Math.min(72, h + 1))}
+              onClick={() => setTimesteps((h) => Math.min(72, h + 1))}
               className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-[11px] text-white/50 hover:border-white/20 hover:text-white/80"
             >
               +
@@ -344,8 +448,33 @@ function RunConfigPanel({
 
         {/* Actions */}
         <div className="space-y-1 pt-0.5 sm:space-y-1.5">
-          <ActionBtn onClick={onStartSimulation} label="Start Simulation" icon={Play} variant="primary" />
-          <ActionBtn onClick={onAskAgent} label="Ask Agent To Run" icon={Bot} />
+          <ActionBtn
+            onClick={() => onStartSimulation?.(timesteps)}
+            label="Start Simulation"
+            icon={Play}
+            variant="primary"
+            disabled={!runActionsEnabled || simulationRunning}
+            title={
+              !runActionsEnabled
+                ? "Set the project area and at least one point or line ignition first"
+                : simulationRunning
+                  ? "Simulation is already processing"
+                  : undefined
+            }
+          />
+          <ActionBtn
+            onClick={onAskAgent}
+            label="Ask Agent To Run"
+            icon={Bot}
+            disabled={!runActionsEnabled || simulationRunning}
+            title={
+              !runActionsEnabled
+                ? "Set the project area and at least one point or line ignition first"
+                : simulationRunning
+                  ? "Simulation is already processing"
+                  : undefined
+            }
+          />
           {onResetProject && (
             <>
               <ActionBtn
@@ -353,6 +482,14 @@ function RunConfigPanel({
                 label="Reset project"
                 icon={RotateCcw}
                 variant="danger"
+                disabled={!runActionsEnabled || simulationRunning}
+                title={
+                  !runActionsEnabled
+                    ? "Set the project area and at least one point or line ignition first"
+                    : simulationRunning
+                      ? "Wait for simulation processing to finish"
+                      : undefined
+                }
               />
               <Dialog open={resetOpen} onOpenChange={setResetOpen}>
                 <DialogContent className="max-w-sm border-white/10 bg-[#141414] text-white shadow-xl">
@@ -428,10 +565,13 @@ function ScenarioPanel({
   weather,
   onWeatherOverride,
   onWeatherFetched,
+  onWeatherFetchedAtCoords,
   onActionConfirm,
   onRequestMapInteraction,
   onLocationSearchPreview,
   planPreview,
+  plan,
+  onCommitGridField,
   mapRef,
   hasProjectLocation,
 }: {
@@ -439,6 +579,7 @@ function ScenarioPanel({
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
   /** Applied to scenario state and mirrored into project config (simulation). */
   onWeatherFetched?: (next: WeatherValues) => void;
+  onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
   onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
   onLocationSearchPreview?: (
@@ -449,23 +590,31 @@ function ScenarioPanel({
     } | null,
   ) => void;
   planPreview?: { segments: number; fuelBreaks: number; centerSet: boolean };
+  plan?: IgnitionPlan;
+  onCommitGridField?: (
+    field: "cellResolution" | "cellSpaceDimension" | "cellSpaceDimensionLat",
+    value: number,
+  ) => void;
   mapRef?: import("leaflet").Map | null;
   hasProjectLocation: boolean;
 }) {
   const [open, setOpen] = useState<DrawerId>("scenario");
-  const [zipCode, setZipCode] = useState("");
+  const [weatherQuery, setWeatherQuery] = useState("");
   const [fetching, setFetching] = useState(false);
-  const [zipFetchError, setZipFetchError] = useState<string | null>(null);
-  const [zipFetchHint, setZipFetchHint] = useState<string | null>(null);
+  const [weatherFetchError, setWeatherFetchError] = useState<string | null>(null);
+  const [weatherFetchHint, setWeatherFetchHint] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<ActionId | null>(null);
+  const [cellGridOpen, setCellGridOpen] = useState(false);
 
   function handleActionBtnClick(id: ActionId) {
     if (id === "location" && hasProjectLocation) return;
     if (MAP_INTERACTION_ACTIONS.includes(id)) {
       if (!hasProjectLocation) return;
-      // Go straight to map interaction — no modal
-      const mode: MapInteractionMode = id === "point-ignition" ? "pin" : "line";
-      onRequestMapInteraction?.(mode);
+      if (id === "point-ignition") {
+        onRequestMapInteraction?.("pin");
+      } else {
+        onRequestMapInteraction?.("line");
+      }
     } else {
       if (id === "fuel-break" && !hasProjectLocation) return;
       // location and fuel-break open their own dedicated modals
@@ -474,17 +623,17 @@ function ScenarioPanel({
   }
 
   function toggle(id: DrawerId) {
-    setOpen((prev) => (prev === id ? "scenario" : id));
+    setOpen(id);
   }
 
-  async function handleFetch() {
-    if (!zipCode.trim()) return;
+  async function handleFetchWeather() {
+    if (!weatherQuery.trim()) return;
     setFetching(true);
-    setZipFetchError(null);
-    setZipFetchHint(null);
+    setWeatherFetchError(null);
+    setWeatherFetchHint(null);
     try {
       const res = await fetch(
-        `/api/weather/zip?zip=${encodeURIComponent(zipCode.trim())}`,
+        `/api/weather/zip?q=${encodeURIComponent(weatherQuery.trim())}`,
         { cache: "no-store" },
       );
       const json = (await res.json()) as {
@@ -492,18 +641,27 @@ function ScenarioPanel({
         weather?: WeatherValues;
         placeLabel?: string;
         source?: string;
+        lat?: number;
+        lng?: number;
       };
       if (!res.ok || !json.weather) {
         throw new Error(json.error ?? "Weather fetch failed");
       }
       onWeatherFetched?.(json.weather);
-      setZipFetchHint(
+      if (
+        typeof json.lat === "number" &&
+        typeof json.lng === "number" &&
+        onWeatherFetchedAtCoords
+      ) {
+        onWeatherFetchedAtCoords(json.weather, { lat: json.lat, lng: json.lng });
+      }
+      setWeatherFetchHint(
         json.placeLabel
-          ? `US ZIP → ${json.placeLabel} · forecast (Open-Meteo)`
-          : "Current conditions loaded for US ZIP (Open-Meteo)",
+          ? `${json.placeLabel} · current conditions (Open-Meteo)`
+          : "Current conditions loaded (Open-Meteo)",
       );
     } catch (e) {
-      setZipFetchError(e instanceof Error ? e.message : String(e));
+      setWeatherFetchError(e instanceof Error ? e.message : String(e));
     } finally {
       setFetching(false);
     }
@@ -590,39 +748,77 @@ function ScenarioPanel({
             ) : null}
           </div>
 
-          {/* Weather fetch */}
-          <div className="space-y-1.5 border-t border-white/6 pt-2.5 sm:space-y-2 sm:pt-3">
-            <SectionLabel>Weather Fetch</SectionLabel>
-            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-stretch sm:gap-2">
-              <input
-                value={zipCode}
-                onChange={(e) => setZipCode(e.target.value)}
-                placeholder="US ZIP code"
-                inputMode="numeric"
-                autoComplete="postal-code"
-                className="min-h-[32px] min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] text-white placeholder:text-white/25 outline-none focus:border-white/20 sm:px-3 sm:py-2 sm:text-[11px]"
-              />
+          {hasProjectLocation && plan && onCommitGridField ? (
+            <div className="border-t border-white/6 pt-2.5 sm:pt-3">
               <button
                 type="button"
-                onClick={() => void handleFetch()}
-                disabled={!zipCode.trim() || fetching}
-                className="min-h-[32px] shrink-0 rounded-lg bg-orange-500/20 px-3 py-1.5 text-[10px] font-medium text-orange-400 transition hover:bg-orange-500/30 disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[72px] sm:px-4 sm:text-[11px]"
+                onClick={() => setCellGridOpen((v) => !v)}
+                className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-white/65 transition hover:bg-white/5 hover:text-white/85"
               >
-                {fetching ? "…" : "Fetch"}
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 shrink-0 text-white/30 transition-transform",
+                    cellGridOpen && "rotate-90",
+                  )}
+                />
+                <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-[11px]">
+                  Cell Grid
+                </span>
               </button>
+              <AnimatePresence initial={false}>
+                {cellGridOpen ? (
+                  <motion.div
+                    key="cell-grid"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.16, ease: "easeInOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-1.5 pt-1">
+                      <p className="text-[8px] leading-relaxed text-white/30 sm:text-[9px]">
+                        Cell resolution (meters) and grid size in cells. DEVS-FIRE uses one square
+                        dimension equal to the larger of width/height when calling the API.
+                      </p>
+                      <div className="rounded-lg border border-white/8 bg-white/3 px-2 sm:px-3">
+                        <InlineEdit
+                          label="Cell resolution"
+                          value={plan.cellResolution}
+                          suffix="m"
+                          onCommit={(v) =>
+                            onCommitGridField(
+                              "cellResolution",
+                              Math.max(1, Math.min(500, Math.round(v))),
+                            )
+                          }
+                        />
+                        <InlineEdit
+                          label="Cells (E-W)"
+                          value={plan.cellSpaceDimension}
+                          onCommit={(v) =>
+                            onCommitGridField(
+                              "cellSpaceDimension",
+                              Math.max(10, Math.min(2000, Math.round(v))),
+                            )
+                          }
+                        />
+                        <InlineEdit
+                          label="Cells (N-S)"
+                          value={plan.cellSpaceDimensionLat}
+                          onCommit={(v) =>
+                            onCommitGridField(
+                              "cellSpaceDimensionLat",
+                              Math.max(10, Math.min(2000, Math.round(v))),
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </div>
-            {zipFetchError ? (
-              <p className="text-[9px] leading-snug text-red-400/90 sm:text-[10px]">{zipFetchError}</p>
-            ) : null}
-            {zipFetchHint ? (
-              <p className="text-[9px] leading-snug text-emerald-400/80 sm:text-[10px]">{zipFetchHint}</p>
-            ) : (
-              <p className="text-[9px] text-white/25 sm:text-[10px]">
-                US ZIP codes only (lookup via Zippopotam). Forecast from Open-Meteo at that location. Values
-                sync to the plan and Weather &amp; Layers; edits there override for the run.
-              </p>
-            )}
-          </div>
+          ) : null}
 
           {/* Weather values */}
           <div className="border-t border-white/6 pt-2.5 sm:pt-3">
@@ -642,6 +838,37 @@ function ScenarioPanel({
               <InlineEdit label="Direction" value={weather.windDirection} suffix="°" onCommit={(v) => onWeatherOverride("windDirection", v)} />
               <InlineEdit label="Temp" value={weather.temperature} suffix="°F" onCommit={(v) => onWeatherOverride("temperature", v)} />
               <InlineEdit label="Humidity" value={weather.humidity} suffix="%" onCommit={(v) => onWeatherOverride("humidity", v)} />
+            </div>
+
+            <div className="mt-2 space-y-1.5 border-t border-white/6 pt-2.5 sm:space-y-2 sm:pt-3">
+              <SectionLabel>Weather Lookup</SectionLabel>
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-stretch sm:gap-2">
+                <input
+                  value={weatherQuery}
+                  onChange={(e) => setWeatherQuery(e.target.value)}
+                  placeholder="City, address, or US ZIP"
+                  autoComplete="postal-code"
+                  className="min-h-[32px] min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] text-white placeholder:text-white/25 outline-none focus:border-white/20 sm:px-3 sm:py-2 sm:text-[11px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleFetchWeather()}
+                  disabled={!weatherQuery.trim() || fetching}
+                  className="min-h-[32px] shrink-0 rounded-lg bg-orange-500/20 px-3 py-1.5 text-[10px] font-medium text-orange-400 transition hover:bg-orange-500/30 disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[72px] sm:px-4 sm:text-[11px]"
+                >
+                  {fetching ? "…" : "Fetch"}
+                </button>
+              </div>
+              {weatherFetchError ? (
+                <p className="text-[9px] leading-snug text-red-400/90 sm:text-[10px]">{weatherFetchError}</p>
+              ) : null}
+              {weatherFetchHint ? (
+                <p className="text-[9px] leading-snug text-emerald-400/80 sm:text-[10px]">{weatherFetchHint}</p>
+              ) : (
+                <p className="text-[9px] text-white/25 sm:text-[10px]">
+                  Enter a city, street address, or US ZIP. Weather fields are auto-populated from Open-Meteo.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -779,6 +1006,15 @@ export type TerrainOverlayState = {
   showCellInfo: boolean;
 };
 
+function selectedTerrainLayer(show: Set<TerrainLayer>): TerrainLayer | null {
+  const first = show.values().next().value as TerrainLayer | undefined;
+  if (first === "fuel" || first === "slope" || first === "aspect") return first;
+  if (show.has("fuel")) return "fuel";
+  if (show.has("slope")) return "slope";
+  if (show.has("aspect")) return "aspect";
+  return null;
+}
+
 async function tryFetchTerrainMatrix(
   path: string,
   token: string,
@@ -805,8 +1041,12 @@ function TerrainDataPanel({
   weather: WeatherValues;
 }) {
   if (!centerSet) return null;
+  const [terrainOpen, setTerrainOpen] = useState(true);
 
-  async function handleFetch() {
+  async function handleFetch(layerOverride?: TerrainLayer) {
+    const active = layerOverride ?? selectedTerrainLayer(state.show);
+    if (!active) return;
+
     onChange({ loading: true, error: null });
 
     let token: string;
@@ -820,36 +1060,45 @@ function TerrainDataPanel({
       return;
     }
 
-    const [fuelResult, slopeResult, aspectResult] = await Promise.all([
-      state.show.has("fuel")   ? tryFetchTerrainMatrix("/getCellFuel/", token)   : Promise.resolve({ data: state.data.fuel,   error: null }),
-      state.show.has("slope")  ? tryFetchTerrainMatrix("/getCellSlope/", token)  : Promise.resolve({ data: state.data.slope,  error: null }),
-      state.show.has("aspect") ? tryFetchTerrainMatrix("/getCellAspect/", token) : Promise.resolve({ data: state.data.aspect, error: null }),
-    ]);
+    const endpoint =
+      active === "fuel"
+        ? "/getCellFuel/"
+        : active === "slope"
+          ? "/getCellSlope/"
+          : "/getCellAspect/";
 
-    const errors: string[] = [];
-    if (fuelResult.error)   errors.push(`Fuel: ${fuelResult.error}`);
-    if (slopeResult.error)  errors.push(`Slope: ${slopeResult.error}`);
-    if (aspectResult.error) errors.push(`Aspect: ${aspectResult.error}`);
+    const result = await tryFetchTerrainMatrix(endpoint, token);
 
     onChange({
       loading: false,
       data: {
-        fuel:   fuelResult.data,
-        slope:  slopeResult.data,
-        aspect: aspectResult.data,
+        fuel: active === "fuel" ? result.data : null,
+        slope: active === "slope" ? result.data : null,
+        aspect: active === "aspect" ? result.data : null,
       },
-      error: errors.length ? errors.join(" · ") : null,
+      error: result.error ? `${active}: ${result.error}` : null,
     });
   }
 
-  function toggleLayer(layer: TerrainLayer) {
-    const next = new Set(state.show);
-    if (next.has(layer)) next.delete(layer); else next.add(layer);
-    onChange({ show: next });
+  async function selectLayer(layer: TerrainLayer) {
+    onChange({
+      show: new Set([layer]),
+      data: {
+        fuel: layer === "fuel" ? state.data.fuel : null,
+        slope: layer === "slope" ? state.data.slope : null,
+        aspect: layer === "aspect" ? state.data.aspect : null,
+      },
+    });
+
+    const currentData = state.data[layer];
+    if (currentData !== null || state.loading) return;
+    await handleFetch(layer);
   }
 
-  const hasSelection = state.show.size > 0;
+  const activeLayer = selectedTerrainLayer(state.show);
+  const hasSelection = Boolean(activeLayer);
   const hasData = state.data.fuel !== null || state.data.slope !== null || state.data.aspect !== null;
+  const activeHasData = activeLayer ? state.data[activeLayer] !== null : false;
 
   const LAYERS: { id: TerrainLayer; label: string; loadedKey: keyof TerrainData }[] = [
     { id: "fuel",   label: "Show Fuel",   loadedKey: "fuel"   },
@@ -859,39 +1108,44 @@ function TerrainDataPanel({
 
   return (
     <Panel className="w-[160px] overflow-hidden sm:w-[175px] md:w-[190px]">
-      {/* Header */}
-      <div className="flex items-center gap-1.5 border-b border-white/6 px-3 py-2">
-        <Database className="h-3 w-3 shrink-0 text-sky-400/70 sm:h-3.5 sm:w-3.5" />
-        <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
-          Terrain Data
-        </span>
+      <TerrainAccordionSection
+        open={terrainOpen}
+        onToggle={() => setTerrainOpen((prev) => !prev)}
+        icon={Database}
+        label="Terrain Data"
+      >
+      <div className="space-y-3">
         {hasData && (
-          <span className="ml-auto shrink-0 rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-sky-300">
+          <span className="inline-block rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-sky-300">
             loaded
           </span>
         )}
-      </div>
-
-      <div className="space-y-3 px-3 py-2.5">
-        {/* Layer checkboxes */}
+        {/* Exclusive layer selector */}
         <div className="space-y-2">
           {LAYERS.map(({ id, label, loadedKey }) => (
-            <div key={id} className="flex items-center gap-2">
-              <Checkbox
-                id={`terrain-${id}`}
-                checked={state.show.has(id)}
-                onCheckedChange={() => toggleLayer(id)}
-              />
-              <label
-                htmlFor={`terrain-${id}`}
-                className="flex flex-1 cursor-pointer select-none items-center justify-between text-[10px] text-white/60 sm:text-[11px]"
-              >
-                {label}
-                {state.data[loadedKey] !== null && (
-                  <span className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400/70" />
-                )}
-              </label>
-            </div>
+            <button
+              key={id}
+              type="button"
+              onClick={() => selectLayer(id)}
+              disabled={state.loading}
+              className={cn(
+                "flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-[10px] transition sm:text-[11px]",
+                activeLayer === id
+                  ? "border-sky-400/40 bg-sky-500/15 text-sky-200"
+                  : "border-white/10 bg-white/4 text-white/60 hover:border-white/20 hover:text-white/80",
+                state.loading && "cursor-not-allowed opacity-55",
+              )}
+            >
+              <span>{label}</span>
+              <span className="flex items-center gap-1">
+                {state.data[loadedKey] !== null ? (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-300/80" />
+                ) : null}
+                {activeLayer === id ? (
+                  <span className="text-[9px] font-medium uppercase tracking-wide">active</span>
+                ) : null}
+              </span>
+            </button>
           ))}
         </div>
 
@@ -910,6 +1164,12 @@ function TerrainDataPanel({
           {state.loading ? "Fetching…" : "Fetch Data"}
         </button>
 
+        {!state.loading && activeLayer && !activeHasData ? (
+          <p className="text-[9px] leading-snug text-white/35 sm:text-[10px]">
+            Select a layer above; data fetch starts automatically once selected.
+          </p>
+        ) : null}
+
 
         {/* Cell info toggle */}
         <div className="flex items-center justify-between gap-2 border-t border-white/6 pt-2.5">
@@ -926,6 +1186,7 @@ function TerrainDataPanel({
           />
         </div>
       </div>
+      </TerrainAccordionSection>
     </Panel>
   );
 }
@@ -961,7 +1222,7 @@ function IgnitionLinesPanel({ plan, onSegmentEdit, onSegmentDelete }: IgnitionLi
   if (rows.length === 0) return null;
 
   return (
-    <Panel className="w-[190px] sm:w-[210px] md:w-[230px]">
+    <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
       <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
         <Flame className="h-3 w-3 text-orange-400/70 sm:h-3.5 sm:w-3.5" />
         <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
@@ -1135,7 +1396,7 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
   if (plan.sup_infos.length === 0) return null;
 
   return (
-    <Panel className="w-[190px] sm:w-[210px] md:w-[230px]">
+    <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
       <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
         <Shield className="h-3 w-3 text-sky-400/70 sm:h-3.5 sm:w-3.5" />
         <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
@@ -1219,12 +1480,13 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
 type MapOverlayPanelsProps = {
   stats?: SimStats;
   messages: UIMessage[];
-  onStartSimulation?: () => void;
+  onStartSimulation?: (simulationTimesteps: number) => void;
   onAskAgent?: () => void;
   onResetProject?: () => void;
   weather: WeatherValues;
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
   onWeatherFetched?: (next: WeatherValues) => void;
+  onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
   onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
   onLocationSearchPreview?: (
@@ -1246,6 +1508,13 @@ type MapOverlayPanelsProps = {
   onFuelBreakDelete?: (index: number) => void;
   terrainState?: TerrainOverlayState;
   onTerrainChange?: (next: Partial<TerrainOverlayState>) => void;
+  /** True when boundary exists and at least one ignition is defined */
+  runActionsEnabled?: boolean;
+  onCommitPlanGridField?: (
+    field: "cellResolution" | "cellSpaceDimension" | "cellSpaceDimensionLat",
+    value: number,
+  ) => void;
+  simulationRunning?: boolean;
 };
 
 export function MapOverlayPanels({
@@ -1256,6 +1525,7 @@ export function MapOverlayPanels({
   weather,
   onWeatherOverride,
   onWeatherFetched,
+  onWeatherFetchedAtCoords,
   onActionConfirm,
   onRequestMapInteraction,
   onLocationSearchPreview,
@@ -1270,6 +1540,9 @@ export function MapOverlayPanels({
   onFuelBreakDelete,
   terrainState,
   onTerrainChange,
+  runActionsEnabled = false,
+  onCommitPlanGridField,
+  simulationRunning = false,
 }: MapOverlayPanelsProps) {
   return (
     <>
@@ -1279,10 +1552,13 @@ export function MapOverlayPanels({
           weather={weather}
           onWeatherOverride={onWeatherOverride}
           onWeatherFetched={onWeatherFetched}
+          onWeatherFetchedAtCoords={onWeatherFetchedAtCoords}
           onActionConfirm={onActionConfirm}
           onRequestMapInteraction={onRequestMapInteraction}
           onLocationSearchPreview={onLocationSearchPreview}
           planPreview={planPreview}
+          plan={projectConfig}
+          onCommitGridField={onCommitPlanGridField}
           mapRef={mapRef}
           hasProjectLocation={hasProjectLocation}
         />
@@ -1291,6 +1567,8 @@ export function MapOverlayPanels({
             onStartSimulation={onStartSimulation}
             onAskAgent={onAskAgent}
             onResetProject={onResetProject}
+            runActionsEnabled={runActionsEnabled}
+            simulationRunning={simulationRunning}
           />
           {projectConfig && onSegmentEdit && onSegmentDelete && (
             <IgnitionLinesPanel
@@ -1309,8 +1587,8 @@ export function MapOverlayPanels({
       </div>
 
       {/* Top-right: Simulation progress */}
-      <div className="pointer-events-none absolute right-2 top-2 z-450 w-[180px] sm:right-3 sm:top-3 sm:w-[200px] md:w-[220px]">
-        <ProgressPanel stats={stats} />
+      <div className="pointer-events-none absolute right-2 top-2 z-450 w-[160px] sm:right-3 sm:top-3 sm:w-[175px] md:w-[190px]">
+        <ProgressPanel stats={stats} terrainState={terrainState} />
       </div>
 
       {/* Bottom-right: Terrain Data above map zoom/style controls */}

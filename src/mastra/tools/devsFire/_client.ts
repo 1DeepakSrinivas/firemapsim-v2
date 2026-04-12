@@ -2,17 +2,27 @@ import "server-only";
 
 import z from "zod";
 
-export const DEVS_FIRE_BASE_URL = "http://firesim.cs.gsu.edu:8084/api";
+export {
+  parseSimulationOperationsResponse,
+  simulationOperationListSchema,
+  simulationOperationSchema,
+} from "./simulationOperations";
+
+export const DEVS_FIRE_BASE_URL =
+  process.env.DEVS_FIRE_BASE_URL ?? "http://firesim.cs.gsu.edu:8084/api";
 export const DEVS_FIRE_PROXY_PATH = "/api/devs-fire";
 
-export const simulationOperationSchema = z.object({
-  x: z.coerce.number(),
-  y: z.coerce.number(),
-  Operation: z.string(),
-  time: z.coerce.number(),
-});
+function parseTimeoutMs(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
 
-export const simulationOperationListSchema = z.array(simulationOperationSchema);
+const DEVS_FIRE_REQUEST_TIMEOUT_MS = parseTimeoutMs(
+  process.env.DEVS_FIRE_REQUEST_TIMEOUT_MS,
+  30_000,
+);
+
 export const numericMatrixSchema = z.array(z.array(z.coerce.number()));
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -153,27 +163,6 @@ export function parseNumericMatrixResponse(
   throw new Error(`Invalid numeric matrix DEVS-FIRE response for ${endpoint}`);
 }
 
-export function parseSimulationOperationsResponse(
-  data: unknown,
-  endpoint: string,
-) {
-  const direct = simulationOperationListSchema.safeParse(data);
-  if (direct.success) {
-    return direct.data;
-  }
-
-  if (typeof data === "object" && data !== null) {
-    for (const value of Object.values(data as Record<string, unknown>)) {
-      const nested = simulationOperationListSchema.safeParse(value);
-      if (nested.success) {
-        return nested.data;
-      }
-    }
-  }
-
-  throw new Error(`Invalid simulation operation list for ${endpoint}`);
-}
-
 export function getDevsFireProxyUrl(): string {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ??
@@ -228,6 +217,7 @@ export async function devsFirePost(
   extraParams: QueryParams = {},
   body?: unknown,
   headers: HeadersInit = {},
+  options?: { signal?: AbortSignal },
 ): Promise<unknown> {
   const url = new URL(`${DEVS_FIRE_BASE_URL}${normalizePath(path)}`);
 
@@ -244,12 +234,43 @@ export async function devsFirePost(
   const requestHeaders = new Headers(headers);
   const requestParts = toBodyAndHeaders(body, requestHeaders);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: requestParts.headers,
-    body: requestParts.body,
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    Math.max(1_000, DEVS_FIRE_REQUEST_TIMEOUT_MS),
+  );
+
+  let removeAbortListener: (() => void) | null = null;
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      const onAbort = () => controller.abort();
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: requestParts.headers,
+      body: requestParts.body,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as { name?: string })?.name === "AbortError") {
+      throw new Error(
+        `DEVS-FIRE request timed out after ${Math.floor(DEVS_FIRE_REQUEST_TIMEOUT_MS / 1000)}s for ${url.pathname}`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    removeAbortListener?.();
+  }
 
   const responseText = await response.text();
 
