@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseNumericResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const computeBurnedArea = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost("/computeBurnedArea/", userToken);
+      const data = await devsFirePost("/computeBurnedArea/", userToken);
       return parseNumericResponse(data, "/computeBurnedArea/");
     } catch (error) {
       throw new Error(`computeBurnedArea failed: ${toErrorMessage(error)}`);

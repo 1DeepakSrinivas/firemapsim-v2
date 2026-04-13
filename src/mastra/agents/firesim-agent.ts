@@ -1,31 +1,13 @@
 import { Agent } from "@mastra/core/agent";
 import { Memory } from "@mastra/memory";
 
-import { continueSimulation } from "@/mastra/tools/devsFire/continueSimulation";
-import { connectToServer } from "@/mastra/tools/devsFire/connectToServer";
-import { loadAspect } from "@/mastra/tools/devsFire/loadAspect";
-import { loadFuel } from "@/mastra/tools/devsFire/loadFuel";
-import { loadSlope } from "@/mastra/tools/devsFire/loadSlope";
-import { loadWindFlow } from "@/mastra/tools/devsFire/loadWindFlow";
-import { runSimulation } from "@/mastra/tools/devsFire/runSimulation";
-import { setCellResolution } from "@/mastra/tools/devsFire/setCellResolution";
-import { setDynamicIgnition } from "@/mastra/tools/devsFire/setDynamicIgnition";
-import { setPointIgnition } from "@/mastra/tools/devsFire/setPointIgnition";
-import { setSuppressedCell } from "@/mastra/tools/devsFire/setSuppressedCell";
-import { setWindCondition } from "@/mastra/tools/devsFire/setWindCondition";
-import { fetchParcelBoundary } from "@/mastra/tools/geo/fetchParcelBoundary";
-import { fetchTerrainData } from "@/mastra/tools/geo/fetchTerrainData";
-import { geocodeAddress } from "@/mastra/tools/geo/geocodeAddress";
-import { buildWindflowFile } from "@/mastra/tools/weather/buildWindflowFile";
-import { fetchWeather } from "@/mastra/tools/weather/fetchWeather";
-
 import { getFireSimModel } from "../llm/openrouter";
 
 export const fireSimAgent = new Agent({
   id: "firesim-agent",
   name: "Fire Simulation Planner",
   description:
-    "Plans wildfire simulations and orchestrates terrain, weather, and DEVS-FIRE execution steps.",
+    "Plans wildfire simulations and orchestrates setup data collection and simulation triggering.",
   memory: new Memory({
     options: {
       lastMessages: 40,
@@ -42,12 +24,12 @@ Operators usually **draw the project rectangle and ignitions on the map** (Scena
 
 Work through these parameters in order when still missing. Ask only ONE question per turn. Do not skip ahead.
 
-1. **Project location** — Ask for an address, city, or coordinates. Use geocodeAddress to resolve it. Confirm the resolved location back to the user. If they already drew a project area on the map, skip lecturing them on location and move to what is still missing.
-2. **Ignition point** — Ask where the fire starts (landmark, address, or lat/lng offset from the project location). Use setPointIgnition once confirmed, or acknowledge if they placed ignitions on the map.
+1. **Project location** — Ask for an address, city, or coordinates. Confirm the resolved location back to the user. If they already drew a project area on the map, skip lecturing them on location and move to what is still missing.
+2. **Ignition point** — Ask where the fire starts (landmark, address, or lat/lng offset from the project location), or acknowledge if they placed ignitions on the map.
 3. **Simulation duration** — Ask how many hours to simulate (suggest 4–24h for prescribed burns, up to 72h for large ev ents).
-4. **Weather** — Ask for a zip code to fetch current conditions. Use fetchWeather with the zip. After fetching, report back: wind speed, wind direction, temperature, humidity. Ask the operator to confirm or override any value.
+4. **Weather** — Ask for weather confirmation and optional overrides (wind speed, wind direction, temperature, humidity). Dynamic weather comes from backend routes at run time.
 5. **Fuel break** (optional) — Ask if the operator wants to define any fuel breaks or suppression lines. If yes, collect coordinates. If no, move on.
-6. **Confirmation** — Summarise all collected parameters in a compact list. Ask: "Ready to run the simulation?" If yes, proceed to execute.
+6. **Confirmation** — Summarise all collected parameters in a compact list. Ask: "Ready to run the simulation?" If yes, emit a run trigger event so the app route executes the simulation.
 
 ## Structured output
 
@@ -58,6 +40,16 @@ After each parameter is confirmed, emit a JSON block on its own line in this exa
 \`\`\`
 
 Valid field names: location, ignitionLat, ignitionLng, simulationHours, windSpeed, windDirection, temperature, humidity, cellResolution, cellSpaceDimension, cellSpaceDimensionLat (positive integers for grid setup).
+
+## Run trigger event
+
+When the user confirms they are ready to run, emit one fenced block:
+
+\`\`\`run-trigger
+{"action":"run-simulation","simulationHours":24}
+\`\`\`
+
+Do not call tools. The application backend routes perform execution.
 
 ## Scenario action modals (\`action-result\`)
 
@@ -84,23 +76,5 @@ Strip the fence from conversational text; the UI parses it separately. Prefer va
 - Never ask for information you already have.
 `,
   model: getFireSimModel(),
-  tools: {
-    geocodeAddress,
-    fetchParcelBoundary,
-    fetchTerrainData,
-    fetchWeather,
-    buildWindflowFile,
-    connectToServer,
-    setCellResolution,
-    loadFuel,
-    loadSlope,
-    loadAspect,
-    loadWindFlow,
-    setWindCondition,
-    setPointIgnition,
-    setDynamicIgnition,
-    setSuppressedCell,
-    runSimulation,
-    continueSimulation,
-  },
+  tools: {},
 });

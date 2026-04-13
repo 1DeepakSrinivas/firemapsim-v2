@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseNumericMatrixResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const getCellSlope = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost("/getCellSlope/", userToken);
+      const data = await devsFirePost("/getCellSlope/", userToken);
       return parseNumericMatrixResponse(data, "/getCellSlope/");
     } catch (error) {
       throw new Error(`getCellSlope failed: ${toErrorMessage(error)}`);

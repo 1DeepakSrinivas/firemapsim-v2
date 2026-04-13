@@ -12,6 +12,11 @@ export type SetupUpdate = {
   value: number | string;
 };
 
+export type RunTrigger = {
+  action: "run-simulation";
+  simulationHours?: number;
+};
+
 type CedarCaptionChatProps = {
   dimensions?: { width?: number; maxWidth?: number };
   className?: string;
@@ -25,6 +30,7 @@ type CedarCaptionChatProps = {
       | { parts: Array<{ type: "text"; text: string }>; messageId?: string },
   ) => Promise<void>;
   onSetupUpdate?: (update: SetupUpdate) => void;
+  onRunTrigger?: (trigger: RunTrigger) => void;
   showStarterPrompt?: boolean;
   starterPromptText?: string;
   onSendStarterPrompt?: () => Promise<void>;
@@ -47,24 +53,38 @@ function getMessageText(message: UIMessage): string {
 function parseMessageContent(raw: string): {
   displayText: string;
   updates: SetupUpdate[];
+  runTriggers: RunTrigger[];
 } {
   const updates: SetupUpdate[] = [];
-  const displayText = raw.replace(
-    /```setup-update\n([\s\S]*?)```/g,
-    (_, json: string) => {
+  const runTriggers: RunTrigger[] = [];
+
+  const withoutSetup = raw.replace(/```setup-update\n([\s\S]*?)```/g, (_, json: string) => {
+    try {
+      const parsed = JSON.parse(json.trim()) as SetupUpdate;
+      if (parsed.field !== undefined && parsed.value !== undefined) {
+        updates.push(parsed);
+      }
+    } catch {
+      // malformed block — ignore
+    }
+    return "";
+  });
+
+  const displayText = withoutSetup
+    .replace(/```run-trigger\n([\s\S]*?)```/g, (_, json: string) => {
       try {
-        const parsed = JSON.parse(json.trim()) as SetupUpdate;
-        if (parsed.field !== undefined && parsed.value !== undefined) {
-          updates.push(parsed);
+        const parsed = JSON.parse(json.trim()) as RunTrigger;
+        if (parsed.action === "run-simulation") {
+          runTriggers.push(parsed);
         }
       } catch {
         // malformed block — ignore
       }
-      return ""; // remove from display
-    },
-  ).trim();
+      return "";
+    })
+    .trim();
 
-  return { displayText, updates };
+  return { displayText, updates, runTriggers };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -78,6 +98,7 @@ export function CedarCaptionChat({
   status,
   sendMessage,
   onSetupUpdate,
+  onRunTrigger,
   showStarterPrompt = false,
   starterPromptText,
   onSendStarterPrompt,
@@ -106,10 +127,13 @@ export function CedarCaptionChat({
       // Only process complete messages (not mid-stream)
       if (status === "streaming" && msg === messages[messages.length - 1]) continue;
       processedIds.current.add(msg.id);
-      const { updates } = parseMessageContent(getMessageText(msg));
+      const { updates, runTriggers } = parseMessageContent(getMessageText(msg));
       for (const u of updates) onSetupUpdate(u);
+      if (onRunTrigger) {
+        for (const trigger of runTriggers) onRunTrigger(trigger);
+      }
     }
-  }, [messages, status, onSetupUpdate]);
+  }, [messages, status, onSetupUpdate, onRunTrigger]);
 
   async function submitPrompt(prompt: string) {
     const value = prompt.trim();

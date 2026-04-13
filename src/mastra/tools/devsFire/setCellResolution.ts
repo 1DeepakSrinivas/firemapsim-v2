@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -15,7 +15,7 @@ export const setCellResolution = createTool({
   inputSchema,
   execute: async ({ userToken, cellResolution, cellDimension }) => {
     try {
-      return await devsFireProxyPost("/setCellResolution/", userToken, {
+      return await devsFirePost("/setCellResolution/", userToken, {
         cellResolution,
         cellDimension,
       });

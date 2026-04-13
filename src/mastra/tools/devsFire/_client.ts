@@ -172,6 +172,11 @@ export function getDevsFireProxyUrl(): string {
   return `${appUrl}${DEVS_FIRE_PROXY_PATH}`;
 }
 
+/**
+ * Browser-oriented proxy: POSTs to this app's `/api/devs-fire`.
+ * Server-side code (Mastra tools, workflows, `executeDevsFireSimulation`) should use
+ * {@link devsFirePost} directly to avoid relying on `NEXT_PUBLIC_APP_URL` self-fetch.
+ */
 export async function devsFireProxyPost(
   path: string,
   token?: string,

@@ -7,7 +7,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Flame, Home, Play } from "lucide-react";
 
-import { CedarCaptionChat, type SetupUpdate } from "@/chatComponents/CedarCaptionChat";
+import {
+  CedarCaptionChat,
+  type RunTrigger,
+  type SetupUpdate,
+} from "@/chatComponents/CedarCaptionChat";
 import { ProjectAgentChatHost } from "@/components/map/ProjectAgentChatHost";
 import FireMap from "@/components/map/FireMap";
 import FireOverlay from "@/components/map/FireOverlay";
@@ -167,6 +171,9 @@ export function ProjectWorkspace({
   }, []);
 
   const [mapInteractionMode, setMapInteractionMode] = useState<MapInteractionMode>(null);
+  const [interactionPalette, setInteractionPalette] = useState<
+    "fuel-break" | "location" | "ignition"
+  >("ignition");
   const [interactionHint, setInteractionHint] = useState<string | null>(null);
   const pendingActionRef = useRef<"location" | "fuel-break" | null>(null);
   const pendingPolygonRef = useRef<import("leaflet").LatLng[]>([]);
@@ -601,6 +608,15 @@ export function ProjectWorkspace({
     }
   }, []);
 
+  const handleRunTrigger = useCallback((trigger: RunTrigger) => {
+    if (trigger.action !== "run-simulation") return;
+    const requested =
+      typeof trigger.simulationHours === "number" && Number.isFinite(trigger.simulationHours)
+        ? Math.max(1, Math.min(72, Math.round(trigger.simulationHours)))
+        : 24;
+    void handleStartSimulation(requested);
+  }, [handleStartSimulation]);
+
   const handleActionConfirm = useCallback((payload: ActionPayload) => {
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     if (payload.action === "location") {
@@ -629,6 +645,34 @@ export function ProjectWorkspace({
       return { ...prev, sup_infos, sup_num: sup_infos.length };
     });
   }, []);
+
+  const handlePointIgnitionEdit = useCallback(
+    (input: { teamIndex: number; segmentIndex: number; x: number; y: number }) => {
+      const x = Number.isFinite(input.x) ? Math.max(0, Math.round(input.x)) : 0;
+      const y = Number.isFinite(input.y) ? Math.max(0, Math.round(input.y)) : 0;
+      setProjectConfig((prev) => {
+        const team = prev.team_infos[input.teamIndex];
+        if (!team) return prev;
+        const seg = team.details[input.segmentIndex];
+        if (!seg) return prev;
+        const details = team.details.map((s, idx) => {
+          if (idx !== input.segmentIndex) return s;
+          return {
+            ...s,
+            start_x: x,
+            start_y: y,
+            end_x: x,
+            end_y: y,
+          };
+        });
+        const teams = prev.team_infos.map((t, ti) =>
+          ti === input.teamIndex ? { ...t, details } : t,
+        );
+        return { ...prev, team_infos: teams };
+      });
+    },
+    [],
+  );
 
   const resetProject = useCallback(() => {
     const nextIntroDone = agentChatSnapshot?.introDone ?? false;
@@ -698,6 +742,12 @@ export function ProjectWorkspace({
   }, [mapInteractionMode]);
 
   useEffect(() => {
+    if (!mapInteractionMode) {
+      setInteractionPalette("ignition");
+    }
+  }, [mapInteractionMode]);
+
+  useEffect(() => {
     return () => {
       if (interactionHintTimerRef.current) clearTimeout(interactionHintTimerRef.current);
     };
@@ -726,8 +776,11 @@ export function ProjectWorkspace({
   );
 
   const hasProjectLocation = !!projectConfig.boundaryGeoJSON;
-  const ignitionSegmentCount = projectConfig.team_infos[0]?.details.length ?? 0;
-  const runActionsEnabled = hasProjectLocation && ignitionSegmentCount > 0;
+  const totalSegmentCount = projectConfig.team_infos.reduce(
+    (n, team) => n + team.details.length,
+    0,
+  );
+  const runActionsEnabled = hasProjectLocation && totalSegmentCount > 0;
 
   const handlePin = useCallback((latlng: import("leaflet").LatLng) => {
     const b = projectConfig.boundaryGeoJSON;
@@ -746,7 +799,7 @@ export function ProjectWorkspace({
     const gy = Math.round(dy / cellRes + (projectConfig.cellSpaceDimensionLat / 2));
     const payload: ActionPayload = {
       action: "point-ignition",
-      points: [{ x: gx, y: gy, speed: 0.6, mode: "continuous_static" }],
+      points: [{ x: gx, y: gy, speed: 0.6, mode: "point_static" }],
     };
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     setMapInteractionMode(null);
@@ -890,6 +943,9 @@ export function ProjectWorkspace({
   const handleRequestMapInteraction = useCallback(
     (mode: MapInteractionMode, action?: "location" | "fuel-break") => {
       pendingActionRef.current = action ?? null;
+      if (action === "fuel-break") setInteractionPalette("fuel-break");
+      else if (action === "location") setInteractionPalette("location");
+      else setInteractionPalette("ignition");
       setMapInteractionMode(mode);
       if (mode === "rect" && action === "location") {
         setInteractionHint(
@@ -1122,6 +1178,8 @@ export function ProjectWorkspace({
             lastSimulationSnapshot?.gridMeta?.projCenterLng ??
             projectConfig.proj_center_lng
           }
+          scenarioPlan={projectConfig}
+          interactionPalette={interactionPalette}
         />
 
         <FireOverlay points={effectiveOverlay} />
@@ -1130,7 +1188,7 @@ export function ProjectWorkspace({
           stats={panelStats}
           messages={messages}
           planPreview={{
-            segments: projectConfig.team_infos[0]?.details.length ?? 0,
+            segments: totalSegmentCount,
             fuelBreaks: projectConfig.sup_num,
             centerSet: hasProjectLocation,
           }}
@@ -1179,6 +1237,7 @@ export function ProjectWorkspace({
           projectConfig={projectConfig}
           onSegmentEdit={handleSegmentEdit}
           onSegmentDelete={handleSegmentDelete}
+          onPointIgnitionEdit={handlePointIgnitionEdit}
           onFuelBreakDelete={handleFuelBreakDelete}
           terrainState={terrainState}
           onTerrainChange={handleTerrainChange}
@@ -1199,6 +1258,7 @@ export function ProjectWorkspace({
             status={status}
             sendMessage={sendMessage}
             onSetupUpdate={handleSetupUpdate}
+            onRunTrigger={handleRunTrigger}
             showStarterPrompt={showStarterPrompt}
             starterPromptText={starterPromptText}
             onSendStarterPrompt={sendStarterPrompt}

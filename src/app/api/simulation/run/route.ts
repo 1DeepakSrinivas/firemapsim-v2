@@ -2,9 +2,11 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import z from "zod";
 
-import { executeDevsFireSimulation } from "@/lib/runDevsFireFromPlan";
+import {
+  classifySimulationError,
+  runSimulationWithDynamicWeather,
+} from "@/lib/api/devsFireBackend";
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
-import { fetchCurrentWeatherForCoords } from "@/lib/weather/openMeteoCurrent";
 
 export const runtime = "nodejs";
 
@@ -65,57 +67,11 @@ const planSchema = z
   })
   .passthrough();
 
-const bodySchema = z.object({
+export const simulationRunBodySchema = z.object({
   plan: planSchema,
   simulationHours: z.number().int().positive().max(100_000),
   weatherOverrides: weatherSchema.partial().optional(),
 });
-
-function classifySimulationError(
-  error: unknown,
-): { code: string; message: string; status: number } {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  const lower = message.toLowerCase();
-
-  if (
-    lower.includes("timed out") ||
-    lower.includes("timeout") ||
-    lower.includes("abort")
-  ) {
-    return {
-      code: "upstream_timeout",
-      message:
-        "DEVS-FIRE upstream timed out. Please retry shortly; if it persists, verify server availability.",
-      status: 504,
-    };
-  }
-
-  if (
-    lower.includes("fetch failed") ||
-    lower.includes("couldn't connect") ||
-    lower.includes("failed to fetch") ||
-    lower.includes("econnrefused") ||
-    lower.includes("enotfound") ||
-    lower.includes("network")
-  ) {
-    return {
-      code: "upstream_unreachable",
-      message:
-        "DEVS-FIRE upstream is unreachable from the server. Check network/firewall and DEVS_FIRE_BASE_URL.",
-      status: 502,
-    };
-  }
-
-  if (lower.includes("invalid") && lower.includes("response")) {
-    return {
-      code: "invalid_upstream_response",
-      message: "DEVS-FIRE returned an invalid response payload.",
-      status: 502,
-    };
-  }
-
-  return { code: "simulation_failed", message, status: 500 };
-}
 
 export async function POST(request: NextRequest) {
   const { userId } = await auth();
@@ -137,7 +93,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const json = await request.json();
-    const body = bodySchema.parse(json);
+    const body = simulationRunBodySchema.parse(json);
 
     const hasIgnition = body.plan.team_infos.some((t) => t.details.length > 0);
     if (!hasIgnition) {
@@ -147,55 +103,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let weatherFetched;
     try {
-      const fetched = await fetchCurrentWeatherForCoords(
-        body.plan.proj_center_lat,
-        body.plan.proj_center_lng,
-      );
-      weatherFetched = fetched.weather;
+      const output = await runSimulationWithDynamicWeather({
+        plan: body.plan as import("@/types/ignitionPlan").IgnitionPlan,
+        weatherOverrides: body.weatherOverrides,
+        simulationHours: body.simulationHours,
+      });
+
+      return NextResponse.json({
+        userToken: output.result.userToken,
+        operations: output.result.operations,
+        bbox: output.result.bbox,
+        cellResolution: body.plan.cellResolution,
+        cellSpaceDimension: body.plan.cellSpaceDimension,
+        cellSpaceDimensionLat: body.plan.cellSpaceDimensionLat,
+        projCenterLat: body.plan.proj_center_lat,
+        projCenterLng: body.plan.proj_center_lng,
+        weatherFetched: output.weatherFetched,
+        weatherUsed: output.weatherUsed,
+        weatherOverrideApplied: output.weatherOverrideApplied,
+        weatherSource: output.result.weatherSource,
+      });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Dynamic weather fetch failed";
-      return NextResponse.json(
-        {
-          code: "weather_fetch_failed",
-          error: message,
-        },
-        { status: 502 },
-      );
+      const weatherFetchFailure =
+        error instanceof Error &&
+        (error.message.toLowerCase().includes("open-meteo") ||
+          error.message.toLowerCase().includes("weather"));
+      if (weatherFetchFailure) {
+        return NextResponse.json(
+          {
+            code: "weather_fetch_failed",
+            error: error instanceof Error ? error.message : "Dynamic weather fetch failed",
+          },
+          { status: 502 },
+        );
+      }
+      throw error;
     }
-
-    const weatherOverrides = body.weatherOverrides ?? {};
-    const weatherUsed = {
-      ...weatherFetched,
-      ...weatherOverrides,
-    };
-
-    const overrideFields = Object.keys(weatherOverrides).filter(
-      (k) => weatherOverrides[k as keyof typeof weatherOverrides] !== undefined,
-    );
-
-    const result = await executeDevsFireSimulation({
-      plan: body.plan as import("@/types/ignitionPlan").IgnitionPlan,
-      weather: weatherUsed,
-      simulationHours: body.simulationHours,
-    });
-
-    return NextResponse.json({
-      userToken: result.userToken,
-      operations: result.operations,
-      bbox: result.bbox,
-      cellResolution: body.plan.cellResolution,
-      cellSpaceDimension: body.plan.cellSpaceDimension,
-      cellSpaceDimensionLat: body.plan.cellSpaceDimensionLat,
-      projCenterLat: body.plan.proj_center_lat,
-      projCenterLng: body.plan.proj_center_lng,
-      weatherFetched,
-      weatherUsed,
-      weatherOverrideApplied: overrideFields,
-      weatherSource: result.weatherSource,
-    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

@@ -9,6 +9,8 @@ import type { BoundsChangePayload, FireOverlayPoint, PerimeterGeoJSON } from "./
 import type { MapStyleId } from "./MapOverlayPanels";
 import type { MapInteractionMode, MapInteractionLayerProps } from "./MapInteractionLayer";
 
+import type { IgnitionPlan } from "@/types/ignitionPlan";
+
 import type { FireMapClientProps } from "./FireMapClient";
 import type { TerrainData, TerrainLayer } from "./MapOverlayPanels";
 
@@ -44,6 +46,8 @@ export type FireMapProps = {
   projCenterLng?: number;
   validateLatLng?: MapInteractionLayerProps["validateLatLng"];
   onValidationFail?: MapInteractionLayerProps["onValidationFail"];
+  scenarioPlan?: IgnitionPlan | null;
+  interactionPalette?: "fuel-break" | "location" | "ignition";
 };
 
 export default function FireMap({
@@ -70,6 +74,8 @@ export default function FireMap({
   projCenterLng,
   validateLatLng,
   onValidationFail,
+  scenarioPlan,
+  interactionPalette,
 }: FireMapProps) {
   const points = useMemo(() => fireOverlay ?? [], [fireOverlay]);
 
@@ -98,6 +104,8 @@ export default function FireMap({
       projCenterLng={projCenterLng}
       validateLatLng={validateLatLng}
       onValidationFail={onValidationFail}
+      scenarioPlan={scenarioPlan}
+      interactionPalette={interactionPalette}
     />
   );
 }

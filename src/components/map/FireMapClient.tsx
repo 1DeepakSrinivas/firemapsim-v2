@@ -11,7 +11,8 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
-import type { BoundaryGeoJSON } from "@/types/ignitionPlan";
+import type { BoundaryGeoJSON, IgnitionPlan } from "@/types/ignitionPlan";
+import { PlanScenarioLayer } from "./PlanScenarioLayer";
 import {
   aspectColorForCell,
   fuelColorForCell,
@@ -86,6 +87,13 @@ export type FireMapClientProps = {
   projCenterLng?: number;
   validateLatLng?: MapInteractionLayerProps["validateLatLng"];
   onValidationFail?: MapInteractionLayerProps["onValidationFail"];
+  /** Persisted scenario geometry (ignition segments, fuel breaks) — read-only overlay */
+  scenarioPlan?: IgnitionPlan | null;
+  /**
+   * Accent for active drawing: fuel-break blue, ignition red, location/orange for area setup.
+   * Do not infer from `interactionMode` alone (line mode was shared between ignition and fuel-break).
+   */
+  interactionPalette?: "fuel-break" | "location" | "ignition";
 };
 
 // ─── Project boundary layer ───────────────────────────────────────────────────
@@ -521,9 +529,18 @@ export default function FireMapClient({
   projCenterLng = 0,
   validateLatLng,
   onValidationFail,
+  scenarioPlan = null,
+  interactionPalette = "ignition",
 }: FireMapClientProps) {
   const perimeter = useMemo(() => toPolylinePositions(perimeterGeoJSON), [perimeterGeoJSON]);
   const tile = TILE_LAYERS[mapStyle];
+
+  const interactionAccentColor =
+    interactionPalette === "fuel-break"
+      ? "#2563eb"
+      : interactionPalette === "location"
+        ? "#f97316"
+        : "#dc2626";
 
   return (
     <div className="h-full w-full overflow-hidden">
@@ -573,8 +590,10 @@ export default function FireMapClient({
           projCenterLat={projCenterLat}
           projCenterLng={projCenterLng}
         />
+        {scenarioPlan && <PlanScenarioLayer plan={scenarioPlan} />}
         <MapInteractionLayer
           mode={interactionMode ?? null}
+          accentColor={interactionAccentColor}
           onPin={onPin}
           onLine={onLine}
           onPolyline={onPolyline}
@@ -587,7 +606,7 @@ export default function FireMapClient({
         {perimeter.length > 1 && (
           <Polyline
             positions={perimeter}
-            pathOptions={{ color: "#f59e0b", weight: 3, opacity: 0.95 }}
+            pathOptions={{ color: "#f97316", weight: 3, opacity: 0.95 }}
           />
         )}
       </MapContainer>
