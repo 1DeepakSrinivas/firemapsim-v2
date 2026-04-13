@@ -1044,7 +1044,9 @@ function defaultManualValues(actionId: ActionId): Record<string, string> {
   for (const f of fields) {
     if (f.key === "speed" && (actionId === "point-ignition" || actionId === "line-ignition")) {
       base[f.key] = "0.6";
-    } else if (f.key === "mode" && (actionId === "point-ignition" || actionId === "line-ignition")) {
+    } else if (f.key === "mode" && actionId === "point-ignition") {
+      base[f.key] = "point_static";
+    } else if (f.key === "mode" && actionId === "line-ignition") {
       base[f.key] = "continuous_static";
     } else if (f.key === "cellResolution") {
       base[f.key] = "30";

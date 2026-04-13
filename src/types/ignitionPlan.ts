@@ -136,6 +136,87 @@ export const IGNITION_MODES = [
 
 export type IgnitionMode = (typeof IGNITION_MODES)[number]["value"];
 
+/** Line ignitions (segment start ≠ end): spread along the segment */
+export const LINE_IGNITION_MODES = IGNITION_MODES.filter((m) =>
+  m.value.startsWith("continuous_"),
+);
+
+/** Point ignitions (segment start = end): single-cell ignition */
+export const POINT_IGNITION_MODES = IGNITION_MODES.filter((m) =>
+  m.value.startsWith("point_"),
+);
+
+export function ignitionModesForSegmentGeometry(isPoint: boolean) {
+  return isPoint ? POINT_IGNITION_MODES : LINE_IGNITION_MODES;
+}
+
+/** Valid mode for UI when stored value mismatches geometry (e.g. legacy data). */
+export function ignitionModeForGeometry(
+  mode: string,
+  isPoint: boolean,
+): IgnitionMode {
+  const allowed = ignitionModesForSegmentGeometry(isPoint);
+  const match = allowed.find((m) => m.value === mode);
+  if (match) return match.value;
+  return allowed[0].value;
+}
+
+/** Team slots available in the ignition UI (Team 1 … Team 10 → indices 0–9). */
+export const IGNITION_TEAM_PICKER_COUNT = 10;
+
+/** Ensure `team_infos` has at least `IGNITION_TEAM_PICKER_COUNT` entries so teams 1–10 can be addressed. */
+export function ensureIgnitionTeamSlots(plan: IgnitionPlan): IgnitionPlan {
+  if (plan.team_infos.length >= IGNITION_TEAM_PICKER_COUNT) {
+    return {
+      ...plan,
+      team_num: Math.max(plan.team_num, IGNITION_TEAM_PICKER_COUNT),
+    };
+  }
+  const teams = [...plan.team_infos];
+  for (let i = teams.length; i < IGNITION_TEAM_PICKER_COUNT; i++) {
+    teams.push({
+      team_name: `team${i + 1}`,
+      info_num: 0,
+      details: [],
+    });
+  }
+  return {
+    ...plan,
+    team_infos: teams,
+    team_num: Math.max(plan.team_num, IGNITION_TEAM_PICKER_COUNT),
+  };
+}
+
+function moveSegmentToTeam(
+  plan: IgnitionPlan,
+  fromTeamIndex: number,
+  segmentIndex: number,
+  toTeamIndex: number,
+): IgnitionPlan {
+  if (fromTeamIndex === toTeamIndex) return plan;
+  if (
+    toTeamIndex < 0 ||
+    toTeamIndex >= IGNITION_TEAM_PICKER_COUNT ||
+    fromTeamIndex < 0
+  ) {
+    return plan;
+  }
+  const normalized = ensureIgnitionTeamSlots(plan);
+  const src = normalized.team_infos[fromTeamIndex];
+  if (!src || segmentIndex < 0 || segmentIndex >= src.details.length) return plan;
+  const seg = src.details[segmentIndex];
+  const newSrcDetails = src.details.filter((_, i) => i !== segmentIndex);
+  const dst = normalized.team_infos[toTeamIndex];
+  if (!dst) return plan;
+  const newDstDetails = [...dst.details, seg];
+  const team_infos = normalized.team_infos.map((team, ti) => {
+    if (ti === fromTeamIndex) return { ...team, details: newSrcDetails, info_num: newSrcDetails.length };
+    if (ti === toTeamIndex) return { ...team, details: newDstDetails, info_num: newDstDetails.length };
+    return team;
+  });
+  return { ...normalized, team_infos };
+}
+
 /** Mutable fields the user can edit per-segment in the ignition lines panel */
 export type SegmentEdit = {
   teamIndex: number;
@@ -143,10 +224,17 @@ export type SegmentEdit = {
   speed?: number;
   mode?: IgnitionMode;
   distance?: number | null;
+  /** @deprecated Prefer `moveToTeamIndex`; kept for programmatic renames */
   teamName?: string;
+  /** Move this segment to another team slot (0–9 ↔ Team 1–10). */
+  moveToTeamIndex?: number;
 };
 
 export function applySegmentEdit(plan: IgnitionPlan, edit: SegmentEdit): IgnitionPlan {
+  if (edit.moveToTeamIndex !== undefined && edit.moveToTeamIndex !== edit.teamIndex) {
+    return moveSegmentToTeam(plan, edit.teamIndex, edit.segmentIndex, edit.moveToTeamIndex);
+  }
+
   const teams = plan.team_infos.map((team, ti) => {
     if (ti !== edit.teamIndex) return team;
     const details = team.details.map((seg, si) => {
@@ -231,7 +319,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
     }
     case "point-ignition": {
       const speed = 0.6;
-      const mode = "continuous_static";
+      const mode = "point_static";
       const newDetails = payload.points.map((p) =>
         segmentPoint(p.x, p.y, p.speed ?? speed, p.mode ?? mode),
       );

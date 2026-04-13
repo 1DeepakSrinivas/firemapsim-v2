@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -15,7 +15,7 @@ export const getCellState = createTool({
   inputSchema,
   execute: async ({ userToken, x, y }) => {
     try {
-      return await devsFireProxyPost("/getCellState/", userToken, { x, y });
+      return await devsFirePost("/getCellState/", userToken, { x, y });
     } catch (error) {
       throw new Error(`getCellState failed: ${toErrorMessage(error)}`);
     }

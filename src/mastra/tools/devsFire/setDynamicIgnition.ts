@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -33,7 +33,7 @@ export const setDynamicIgnition = createTool({
     waitTime,
   }) => {
     try {
-      return await devsFireProxyPost("/setDynamicIgnition/", userToken, {
+      return await devsFirePost("/setDynamicIgnition/", userToken, {
         teamNum,
         x1,
         y1,

@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -15,7 +15,7 @@ export const loadSlope = createTool({
   inputSchema,
   execute: async ({ userToken, fileContent, fileName }) => {
     try {
-      return await devsFireProxyPost(
+      return await devsFirePost(
         "/loadSlope/",
         userToken,
         {},

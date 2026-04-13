@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseNumericResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const getWindDegree = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost("/getWindDegree/", userToken);
+      const data = await devsFirePost("/getWindDegree/", userToken);
       return parseNumericResponse(data, "/getWindDegree/");
     } catch (error) {
       throw new Error(`getWindDegree failed: ${toErrorMessage(error)}`);

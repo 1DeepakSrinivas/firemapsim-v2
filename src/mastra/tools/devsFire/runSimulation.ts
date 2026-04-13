@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseSimulationOperationsResponse,
   simulationOperationListSchema,
   toErrorMessage,
@@ -20,7 +20,7 @@ export const runSimulation = createTool({
   outputSchema: simulationOperationListSchema,
   execute: async ({ userToken, time }) => {
     try {
-      const data = await devsFireProxyPost(
+      const data = await devsFirePost(
         "/runSimulation/",
         userToken,
         { time },

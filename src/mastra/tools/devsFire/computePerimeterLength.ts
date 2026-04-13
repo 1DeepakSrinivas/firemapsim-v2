@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseNumericResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const computePerimeterLength = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost(
+      const data = await devsFirePost(
         "/computePerimeterLength/",
         userToken,
       );

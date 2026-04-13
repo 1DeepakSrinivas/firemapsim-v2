@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -15,7 +15,7 @@ export const setWindCondition = createTool({
   inputSchema,
   execute: async ({ userToken, windSpeed, windDirection }) => {
     try {
-      return await devsFireProxyPost("/setWindCondition/", userToken, {
+      return await devsFirePost("/setWindCondition/", userToken, {
         windSpeed,
         windDirection,
       });

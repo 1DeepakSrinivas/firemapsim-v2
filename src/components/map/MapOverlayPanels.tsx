@@ -19,7 +19,7 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
 
 import {
@@ -37,10 +37,15 @@ import type { WeatherValues } from "@/components/weather/WeatherPreview";
 import type {
   ActionPayload,
   BoundaryGeoJSON,
+  IgnitionMode,
   IgnitionPlan,
   SegmentEdit,
 } from "@/types/ignitionPlan";
-import { IGNITION_MODES, applySegmentEdit } from "@/types/ignitionPlan";
+import {
+  IGNITION_TEAM_PICKER_COUNT,
+  ignitionModeForGeometry,
+  ignitionModesForSegmentGeometry,
+} from "@/types/ignitionPlan";
 import type { MapInteractionMode } from "./MapInteractionLayer";
 
 import { ActionModal, type ActionId, MAP_INTERACTION_ACTIONS } from "./ActionModal";
@@ -1191,42 +1196,422 @@ function TerrainDataPanel({
   );
 }
 
-// ─── Ignition Lines Panel ─────────────────────────────────────────────────────
+// ─── Ignition Parameters (line + point ignitions) ────────────────────────────
 
-type IgnitionLinesPanelProps = {
+function IgnitionModeSelect({
+  teamIndex,
+  segIndex,
+  mode,
+  isPoint,
+  onSegmentEdit,
+}: {
+  teamIndex: number;
+  segIndex: number;
+  mode: string;
+  isPoint: boolean;
+  onSegmentEdit: (edit: SegmentEdit) => void;
+}) {
+  const value = ignitionModeForGeometry(mode, isPoint);
+  const options = ignitionModesForSegmentGeometry(isPoint);
+
+  useEffect(() => {
+    if (value !== mode) {
+      onSegmentEdit({ teamIndex, segmentIndex: segIndex, mode: value });
+    }
+  }, [teamIndex, segIndex, mode, value, onSegmentEdit]);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) =>
+        onSegmentEdit({
+          teamIndex,
+          segmentIndex: segIndex,
+          mode: e.target.value as IgnitionMode,
+        })
+      }
+      className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+    >
+      {options.map((m) => (
+        <option key={m.value} value={m.value} className="bg-zinc-900">
+          {m.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+type IgnitionParametersPanelProps = {
   plan: IgnitionPlan;
   onSegmentEdit: (edit: SegmentEdit) => void;
   onSegmentDelete: (teamIndex: number, segmentIndex: number) => void;
+  onPointIgnitionEdit: (input: {
+    teamIndex: number;
+    segmentIndex: number;
+    x: number;
+    y: number;
+  }) => void;
 };
 
-function IgnitionLinesPanel({ plan, onSegmentEdit, onSegmentDelete }: IgnitionLinesPanelProps) {
+type IgnitionParamRow =
+  | {
+      kind: "line";
+      teamIndex: number;
+      segIndex: number;
+      seg: IgnitionPlan["team_infos"][number]["details"][number];
+      key: string;
+    }
+  | {
+      kind: "point";
+      teamIndex: number;
+      segIndex: number;
+      seg: IgnitionPlan["team_infos"][number]["details"][number];
+      key: string;
+    };
+
+function IgnitionTeamSelect({
+  teamIndex,
+  segmentIndex,
+  onSegmentEdit,
+}: {
+  teamIndex: number;
+  segmentIndex: number;
+  onSegmentEdit: (edit: SegmentEdit) => void;
+}) {
+  const safeIndex = Math.min(Math.max(0, teamIndex), IGNITION_TEAM_PICKER_COUNT - 1);
+  return (
+    <select
+      value={safeIndex}
+      onChange={(e) => {
+        const next = parseInt(e.target.value, 10);
+        onSegmentEdit({ teamIndex, segmentIndex, moveToTeamIndex: next });
+      }}
+      className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+    >
+      {Array.from({ length: IGNITION_TEAM_PICKER_COUNT }, (_, i) => (
+        <option key={i} value={i} className="bg-zinc-900">
+          Team {i + 1}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function IgnitionGroupHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div
+      role="presentation"
+      className="flex items-center gap-2 bg-white/[0.04] px-2.5 py-1.5 sm:px-3"
+    >
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-white/45">
+        {label}
+      </span>
+      <span className="ml-auto tabular-nums text-[9px] font-medium text-white/35">{count}</span>
+    </div>
+  );
+}
+
+function IgnitionParametersPanel({
+  plan,
+  onSegmentEdit,
+  onSegmentDelete,
+  onPointIgnitionEdit,
+}: IgnitionParametersPanelProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
 
-  // Collect all line segments (start ≠ end) across all teams
-  const rows: Array<{
-    teamIndex: number;
-    segIndex: number;
-    teamName: string;
-    seg: IgnitionPlan["team_infos"][number]["details"][number];
-    key: string;
-  }> = [];
+  const forwardSegmentEdit = useCallback(
+    (edit: SegmentEdit) => {
+      if (edit.moveToTeamIndex !== undefined) setOpenKey(null);
+      onSegmentEdit(edit);
+    },
+    [onSegmentEdit],
+  );
 
+  const rows: IgnitionParamRow[] = [];
   plan.team_infos.forEach((team, ti) => {
     team.details.forEach((seg, si) => {
-      if (seg.start_x !== seg.end_x || seg.start_y !== seg.end_y) {
-        rows.push({ teamIndex: ti, segIndex: si, teamName: team.team_name, seg, key: `${ti}-${si}` });
+      const key = `${ti}-${si}`;
+      const isPoint = seg.start_x === seg.end_x && seg.start_y === seg.end_y;
+      if (isPoint) {
+        rows.push({
+          kind: "point",
+          teamIndex: ti,
+          segIndex: si,
+          seg,
+          key,
+        });
+      } else {
+        rows.push({
+          kind: "line",
+          teamIndex: ti,
+          segIndex: si,
+          seg,
+          key,
+        });
       }
     });
   });
 
+  const lineRows = rows.filter((r): r is Extract<IgnitionParamRow, { kind: "line" }> => r.kind === "line");
+  const pointRows = rows.filter((r): r is Extract<IgnitionParamRow, { kind: "point" }> => r.kind === "point");
+
   if (rows.length === 0) return null;
+
+  const renderRow = (row: IgnitionParamRow) => {
+    const { teamIndex, segIndex, seg, key } = row;
+    const teamLabel = teamIndex + 1;
+    const isOpen = openKey === key;
+
+    if (row.kind === "point") {
+      return (
+        <div key={key} className="pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => setOpenKey(isOpen ? null : key)}
+            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
+          >
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 shrink-0 text-white/30 transition-transform sm:h-3.5 sm:w-3.5",
+                isOpen && "rotate-90",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-white/70 sm:text-[11px]">
+              Point · {segIndex + 1}
+              <span className="ml-1 text-white/30">(Team {teamLabel})</span>
+            </span>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {isOpen && (
+              <motion.div
+                key="body"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-2 px-2.5 pb-2.5 pt-1 sm:px-3 sm:pb-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] text-white/35 sm:text-[10px]">X (cell)</span>
+                      <input
+                        type="number"
+                        step={1}
+                        value={seg.start_x}
+                        onChange={(e) =>
+                          onPointIgnitionEdit({
+                            teamIndex,
+                            segmentIndex: segIndex,
+                            x: Math.round(Number(e.target.value)),
+                            y: seg.start_y,
+                          })
+                        }
+                        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] text-white/35 sm:text-[10px]">Y (cell)</span>
+                      <input
+                        type="number"
+                        step={1}
+                        value={seg.start_y}
+                        onChange={(e) =>
+                          onPointIgnitionEdit({
+                            teamIndex,
+                            segmentIndex: segIndex,
+                            x: seg.start_x,
+                            y: Math.round(Number(e.target.value)),
+                          })
+                        }
+                        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] text-white/35 sm:text-[10px]">Ignition type</span>
+                    <IgnitionModeSelect
+                      teamIndex={teamIndex}
+                      segIndex={segIndex}
+                      mode={seg.mode}
+                      isPoint
+                      onSegmentEdit={onSegmentEdit}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] text-white/35 sm:text-[10px]">Speed (m/s)</span>
+                    <input
+                      type="number"
+                      min={0.01}
+                      max={10}
+                      step={0.01}
+                      value={seg.speed}
+                      onChange={(e) =>
+                        onSegmentEdit({
+                          teamIndex,
+                          segmentIndex: segIndex,
+                          speed: parseFloat(e.target.value) || seg.speed,
+                        })
+                      }
+                      className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                    />
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] text-white/35 sm:text-[10px]">Team</span>
+                    <IgnitionTeamSelect
+                      teamIndex={teamIndex}
+                      segmentIndex={segIndex}
+                      onSegmentEdit={forwardSegmentEdit}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSegmentDelete(teamIndex, segIndex);
+                      setOpenKey(null);
+                    }}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Remove point
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      );
+    }
+
+    const dx = seg.end_x - seg.start_x;
+    const dy = seg.end_y - seg.start_y;
+    const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
+
+    return (
+      <div key={key} className="pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => setOpenKey(isOpen ? null : key)}
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
+        >
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 shrink-0 text-white/30 transition-transform sm:h-3.5 sm:w-3.5",
+              isOpen && "rotate-90",
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-white/70 sm:text-[11px]">
+            Line · {segIndex + 1}
+            <span className="ml-1 text-white/30">(Team {teamLabel})</span>
+          </span>
+          <span className="shrink-0 text-[9px] text-white/30">{dist}c</span>
+        </button>
+
+        <AnimatePresence initial={false}>
+          {isOpen && (
+            <motion.div
+              key="body"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="overflow-hidden"
+            >
+              <div className="space-y-2 px-2.5 pb-2.5 pt-1 sm:px-3 sm:pb-3">
+                <div className="space-y-0.5">
+                  <span className="text-[9px] text-white/35 sm:text-[10px]">Ignition type</span>
+                  <IgnitionModeSelect
+                    teamIndex={teamIndex}
+                    segIndex={segIndex}
+                    mode={seg.mode}
+                    isPoint={false}
+                    onSegmentEdit={onSegmentEdit}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] text-white/35 sm:text-[10px]">Speed (m/s)</span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={10}
+                    step={0.01}
+                    value={seg.speed}
+                    onChange={(e) =>
+                      onSegmentEdit({
+                        teamIndex,
+                        segmentIndex: segIndex,
+                        speed: parseFloat(e.target.value) || seg.speed,
+                      })
+                    }
+                    className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] text-white/35 sm:text-[10px]">Distance (cells)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="auto"
+                    value={seg.distance ?? ""}
+                    onChange={(e) =>
+                      onSegmentEdit({
+                        teamIndex,
+                        segmentIndex: segIndex,
+                        distance: e.target.value === "" ? null : parseInt(e.target.value),
+                      })
+                    }
+                    className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <span className="text-[9px] text-white/35 sm:text-[10px]">Team</span>
+                  <IgnitionTeamSelect
+                    teamIndex={teamIndex}
+                    segmentIndex={segIndex}
+                    onSegmentEdit={forwardSegmentEdit}
+                  />
+                </div>
+
+                <div className="rounded-md bg-white/3 px-2 py-1.5">
+                  <p className="text-[9px] text-white/25">
+                    ({seg.start_x}, {seg.start_y}) → ({seg.end_x}, {seg.end_y})
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSegmentDelete(teamIndex, segIndex);
+                    setOpenKey(null);
+                  }}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remove line
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
 
   return (
     <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
       <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
         <Flame className="h-3 w-3 text-orange-400/70 sm:h-3.5 sm:w-3.5" />
         <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
-          Ignition Lines
+          Ignition Parameters
         </span>
         <span className="ml-auto rounded-full bg-orange-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-orange-300">
           {rows.length}
@@ -1234,150 +1619,18 @@ function IgnitionLinesPanel({ plan, onSegmentEdit, onSegmentDelete }: IgnitionLi
       </div>
 
       <div className="divide-y divide-white/5">
-        {rows.map(({ teamIndex, segIndex, teamName, seg, key }) => {
-          const isOpen = openKey === key;
-          const dx = seg.end_x - seg.start_x;
-          const dy = seg.end_y - seg.start_y;
-          const dist = Math.round(Math.sqrt(dx * dx + dy * dy));
-
-          return (
-            <div key={key} className="pointer-events-auto">
-              {/* Accordion header */}
-              <button
-                type="button"
-                onClick={() => setOpenKey(isOpen ? null : key)}
-                className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
-              >
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 text-white/30 transition-transform sm:h-3.5 sm:w-3.5",
-                    isOpen && "rotate-90",
-                  )}
-                />
-                <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-white/70 sm:text-[11px]">
-                  Line {segIndex + 1}
-                  <span className="ml-1 text-white/30">({teamName})</span>
-                </span>
-                <span className="shrink-0 text-[9px] text-white/30">{dist}c</span>
-              </button>
-
-              {/* Accordion body */}
-              <AnimatePresence initial={false}>
-                {isOpen && (
-                  <motion.div
-                    key="body"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.18 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="space-y-2 px-2.5 pb-2.5 pt-1 sm:px-3 sm:pb-3">
-                      {/* Ignition type */}
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] text-white/35 sm:text-[10px]">Ignition type</span>
-                        <select
-                          value={seg.mode}
-                          onChange={(e) =>
-                            onSegmentEdit({
-                              teamIndex,
-                              segmentIndex: segIndex,
-                              mode: e.target.value as import("@/types/ignitionPlan").IgnitionMode,
-                            })
-                          }
-                          className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
-                        >
-                          {IGNITION_MODES.map((m) => (
-                            <option key={m.value} value={m.value} className="bg-zinc-900">
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Speed */}
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[9px] text-white/35 sm:text-[10px]">Speed (m/s)</span>
-                        <input
-                          type="number"
-                          min={0.01}
-                          max={10}
-                          step={0.01}
-                          value={seg.speed}
-                          onChange={(e) =>
-                            onSegmentEdit({
-                              teamIndex,
-                              segmentIndex: segIndex,
-                              speed: parseFloat(e.target.value) || seg.speed,
-                            })
-                          }
-                          className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
-                        />
-                      </div>
-
-                      {/* Distance override */}
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[9px] text-white/35 sm:text-[10px]">Distance (cells)</span>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          placeholder="auto"
-                          value={seg.distance ?? ""}
-                          onChange={(e) =>
-                            onSegmentEdit({
-                              teamIndex,
-                              segmentIndex: segIndex,
-                              distance: e.target.value === "" ? null : parseInt(e.target.value),
-                            })
-                          }
-                          className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
-                        />
-                      </div>
-
-                      {/* Team name */}
-                      <div className="space-y-0.5">
-                        <span className="text-[9px] text-white/35 sm:text-[10px]">Team name</span>
-                        <input
-                          type="text"
-                          value={teamName}
-                          onChange={(e) =>
-                            onSegmentEdit({
-                              teamIndex,
-                              segmentIndex: segIndex,
-                              teamName: e.target.value,
-                            })
-                          }
-                          className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
-                        />
-                      </div>
-
-                      {/* Coords (read-only) */}
-                      <div className="rounded-md bg-white/3 px-2 py-1.5">
-                        <p className="text-[9px] text-white/25">
-                          ({seg.start_x}, {seg.start_y}) → ({seg.end_x}, {seg.end_y})
-                        </p>
-                      </div>
-
-                      {/* Delete */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onSegmentDelete(teamIndex, segIndex);
-                          setOpenKey(null);
-                        }}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        Remove line
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          );
-        })}
+        {lineRows.length > 0 && (
+          <>
+            <IgnitionGroupHeader label="Lines" count={lineRows.length} />
+            {lineRows.map(renderRow)}
+          </>
+        )}
+        {pointRows.length > 0 && (
+          <>
+            <IgnitionGroupHeader label="Points" count={pointRows.length} />
+            {pointRows.map(renderRow)}
+          </>
+        )}
       </div>
     </Panel>
   );
@@ -1505,6 +1758,12 @@ type MapOverlayPanelsProps = {
   projectConfig?: IgnitionPlan;
   onSegmentEdit?: (edit: SegmentEdit) => void;
   onSegmentDelete?: (teamIndex: number, segmentIndex: number) => void;
+  onPointIgnitionEdit?: (input: {
+    teamIndex: number;
+    segmentIndex: number;
+    x: number;
+    y: number;
+  }) => void;
   onFuelBreakDelete?: (index: number) => void;
   terrainState?: TerrainOverlayState;
   onTerrainChange?: (next: Partial<TerrainOverlayState>) => void;
@@ -1537,6 +1796,7 @@ export function MapOverlayPanels({
   projectConfig,
   onSegmentEdit,
   onSegmentDelete,
+  onPointIgnitionEdit,
   onFuelBreakDelete,
   terrainState,
   onTerrainChange,
@@ -1570,11 +1830,12 @@ export function MapOverlayPanels({
             runActionsEnabled={runActionsEnabled}
             simulationRunning={simulationRunning}
           />
-          {projectConfig && onSegmentEdit && onSegmentDelete && (
-            <IgnitionLinesPanel
+          {projectConfig && onSegmentEdit && onSegmentDelete && onPointIgnitionEdit && (
+            <IgnitionParametersPanel
               plan={projectConfig}
               onSegmentEdit={onSegmentEdit}
               onSegmentDelete={onSegmentDelete}
+              onPointIgnitionEdit={onPointIgnitionEdit}
             />
           )}
           {projectConfig && onFuelBreakDelete && (

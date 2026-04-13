@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseStringArrayResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const getPerimeterCells = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost("/getPerimeterCells/", userToken);
+      const data = await devsFirePost("/getPerimeterCells/", userToken);
       return parseStringArrayResponse(data, "/getPerimeterCells/");
     } catch (error) {
       throw new Error(`getPerimeterCells failed: ${toErrorMessage(error)}`);

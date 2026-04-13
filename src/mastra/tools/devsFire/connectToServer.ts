@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({});
 const outputSchema = z.object({ token: z.string() });
@@ -13,7 +13,7 @@ export const connectToServer = createTool({
   outputSchema,
   execute: async () => {
     try {
-      const data = await devsFireProxyPost(
+      const data = await devsFirePost(
         "/connectToServer",
         undefined,
         {},
