@@ -5,8 +5,8 @@ Agentic:
     - Chat with the agent to get the information you need
     - Agent gathers all the information you need sequentially
     - Agent then creates the simulation plan (as per Devs-Fire API Requirements)
-    - Agent in conjuction also gathers location information from the map and the address (depending on what the user chooses to do)
-    - Agent in conjuction also gathers weather information from the open-meteo API
+    - Agent in conjunction also gathers location information from the map and the address (depending on what the user chooses to do)
+    - Agent in conjunction also gathers weather information from the open-meteo API
     - Agent then creates the simulation plan (as per Devs-Fire API Requirements)
     - Passes it onto the execution workflow
     - Execution workflow runs the simulation and returns the results

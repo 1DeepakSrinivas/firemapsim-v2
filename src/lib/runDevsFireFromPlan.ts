@@ -8,7 +8,7 @@ import {
 import type { z } from "zod";
 
 import { simulationOperationListSchema } from "@/mastra/tools/devsFire/_client";
-import type { IgnitionPlan, SupInfo } from "@/types/ignitionPlan";
+import type { IgnitionPlan } from "@/types/ignitionPlan";
 
 export type RunDevsFireResult = {
   userToken: string;
@@ -87,6 +87,43 @@ function mapIgnitionMode(mode: string): string {
   return "continuous";
 }
 
+function bresenhamLine(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  stepSpacing: number,
+): { x: number; y: number }[] {
+  const points: { x: number; y: number }[] = [];
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let stepsSinceLastPoint = stepSpacing;
+
+  while (true) {
+    if (stepsSinceLastPoint >= stepSpacing) {
+      points.push({ x: x0, y: y0 });
+      stepsSinceLastPoint = 1;
+    } else {
+      stepsSinceLastPoint += 1;
+    }
+
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x0 += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+  return points;
+}
+
 function bboxFromPlan(plan: IgnitionPlan): [number, number, number, number] {
   const g = plan.boundaryGeoJSON;
   if (g?.type === "Polygon" && g.coordinates[0]?.length) {
@@ -128,7 +165,7 @@ export type RunDevsFireInput = {
 export async function executeDevsFireSimulation(
   input: RunDevsFireInput,
 ): Promise<RunDevsFireResult> {
-  const { plan, weather, simulationHours } = input;
+  const { plan, weather, simulationHours: simulationTimesteps } = input;
 
   if (!plan.proj_center_lat || !plan.proj_center_lng) {
     throw new Error("Project center (proj_center_lat / proj_center_lng) is required.");
@@ -164,63 +201,34 @@ export async function executeDevsFireSimulation(
     windDirection: devsFireWindDirection,
   });
 
-function bresenhamLine(x0: number, y0: number, x1: number, y1: number, stepSpacing: number): {x: number, y: number}[] {
-  const points: {x: number, y: number}[] = [];
-  let dx = Math.abs(x1 - x0);
-  let dy = Math.abs(y1 - y0);
-  let sx = x0 < x1 ? 1 : -1;
-  let sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-  let stepsSinceLastPoint = stepSpacing;
-  
-  while (true) {
-    if (stepsSinceLastPoint >= stepSpacing) {
-      points.push({ x: x0, y: y0 });
-      stepsSinceLastPoint = 1;
-    } else {
-      stepsSinceLastPoint++;
-    }
-    
-    if (x0 === x1 && y0 === y1) break;
-    let e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      x0 += sx;
-    }
-    if (e2 < dx) {
-      err += dx;
-      y0 += sy;
-    }
-  }
-  return points;
-}
-
   for (const sup of plan.sup_infos) {
-    const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
-    for (const p of points) {
-      await devsFirePost("/setSuppressedCell/", userToken, {
-        x1: p.x, // col (xs/Row)
-        y1: p.y, // row (ys/Col)
-      });
-    }
+    await devsFirePost("/setSuppressedCell/", userToken, {
+      x1: sup.x1,
+      y1: sup.y1,
+      x2: sup.x2,
+      y2: sup.y2,
+    });
   }
 
   for (const team of plan.team_infos) {
     const pointCols: number[] = [];
     const pointRows: number[] = [];
     let dynamicPathIndex = 0; // Tracks sequence of paths for the SAME team
-    
+
     for (const seg of team.details) {
       const isPoint =
         seg.start_x === seg.end_x && seg.start_y === seg.end_y;
       const isStatic = seg.mode.includes("_static");
-      
+
       if (isPoint || isStatic) {
         if (isPoint) {
           pointCols.push(seg.start_x);
           pointRows.push(seg.start_y);
         } else {
-          const spacing = seg.mode === "point_static" && seg.distance && seg.distance > 0 ? seg.distance : 1;
+          const spacing =
+            seg.mode === "point_static" && seg.distance && seg.distance > 0
+              ? seg.distance
+              : 1;
           const points = bresenhamLine(seg.start_x, seg.start_y, seg.end_x, seg.end_y, spacing);
           for (const p of points) {
             pointCols.push(p.x);
@@ -244,7 +252,7 @@ function bresenhamLine(x0: number, y0: number, x1: number, y1: number, stepSpaci
           mode: mapIgnitionMode(seg.mode),
           distance: seg.distance ?? undefined,
         });
-        
+
         dynamicPathIndex++;
       }
     }
@@ -255,7 +263,7 @@ function bresenhamLine(x0: number, y0: number, x1: number, y1: number, stepSpaci
   }
 
   // DEVS-FIRE time scale: 1 timestep = roughly 1 second of real fire spread
-  const timeSteps = Math.max(1, Math.min(100_000, Math.floor(simulationHours)));
+  const timeSteps = Math.max(1, Math.min(100_000, Math.floor(simulationTimesteps)));
   const runData = await devsFirePost("/runSimulation/", userToken, {
     time: timeSteps,
   });
