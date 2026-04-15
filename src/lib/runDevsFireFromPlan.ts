@@ -61,8 +61,8 @@ function parseToken(data: unknown): string {
  */
 export function planPointToDevsFirePointIgnition(xsCols: number[], ysRows: number[]) {
   return {
-    xs: ysRows.map(String).join(","),
-    ys: xsCols.map(String).join(","),
+    xs: xsCols.map(String).join(","),
+    ys: ysRows.map(String).join(","),
   };
 }
 
@@ -73,21 +73,13 @@ export function planSegmentToDynamicIgnition(seg: {
   end_y: number;
 }) {
   return {
-    x1: seg.start_y,
-    y1: seg.start_x,
-    x2: seg.end_y,
-    y2: seg.end_x,
+    x1: seg.start_x,
+    y1: seg.start_y,
+    x2: seg.end_x,
+    y2: seg.end_y,
   };
 }
 
-export function planSupToDevsFireRect(s: SupInfo) {
-  return {
-    x1: s.y1,
-    y1: s.x1,
-    x2: s.y2,
-    y2: s.x2,
-  };
-}
 
 function mapIgnitionMode(mode: string): string {
   const m = mode.toLowerCase();
@@ -157,11 +149,7 @@ export async function executeDevsFireSimulation(
   );
   const devsFireWindDirection = meteoToDevsFireWindDirection(weather.windDirection);
 
-  await devsFirePost("/setMultiParameters/", userToken, {
-    lat: plan.proj_center_lat,
-    lng: plan.proj_center_lng,
-    windSpeed: weather.windSpeed,
-    windDirection: devsFireWindDirection,
+  await devsFirePost("/setCellResolution/", userToken, {
     cellResolution: plan.cellResolution,
     cellDimension,
   });
@@ -176,29 +164,88 @@ export async function executeDevsFireSimulation(
     windDirection: devsFireWindDirection,
   });
 
+function bresenhamLine(x0: number, y0: number, x1: number, y1: number, stepSpacing: number): {x: number, y: number}[] {
+  const points: {x: number, y: number}[] = [];
+  let dx = Math.abs(x1 - x0);
+  let dy = Math.abs(y1 - y0);
+  let sx = x0 < x1 ? 1 : -1;
+  let sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let stepsSinceLastPoint = stepSpacing;
+  
+  while (true) {
+    if (stepsSinceLastPoint >= stepSpacing) {
+      points.push({ x: x0, y: y0 });
+      stepsSinceLastPoint = 1;
+    } else {
+      stepsSinceLastPoint++;
+    }
+    
+    if (x0 === x1 && y0 === y1) break;
+    let e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x0 += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+  return points;
+}
+
   for (const sup of plan.sup_infos) {
-    const r = planSupToDevsFireRect(sup);
-    await devsFirePost("/setSuppressedCell/", userToken, r);
+    const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
+    for (const p of points) {
+      await devsFirePost("/setSuppressedCell/", userToken, {
+        x1: p.x, // col (xs/Row)
+        y1: p.y, // row (ys/Col)
+      });
+    }
   }
 
   for (const team of plan.team_infos) {
     const pointCols: number[] = [];
     const pointRows: number[] = [];
+    let dynamicPathIndex = 0; // Tracks sequence of paths for the SAME team
+    
     for (const seg of team.details) {
       const isPoint =
         seg.start_x === seg.end_x && seg.start_y === seg.end_y;
-      if (isPoint) {
-        pointCols.push(seg.start_x);
-        pointRows.push(seg.start_y);
+      const isStatic = seg.mode.includes("_static");
+      
+      if (isPoint || isStatic) {
+        if (isPoint) {
+          pointCols.push(seg.start_x);
+          pointRows.push(seg.start_y);
+        } else {
+          const spacing = seg.mode === "point_static" && seg.distance && seg.distance > 0 ? seg.distance : 1;
+          const points = bresenhamLine(seg.start_x, seg.start_y, seg.end_x, seg.end_y, spacing);
+          for (const p of points) {
+            pointCols.push(p.x);
+            pointRows.push(p.y);
+          }
+        }
       } else {
-        const dyn = planSegmentToDynamicIgnition(seg);
+        const i1 = dynamicPathIndex * 2 + 1; // x1, x3, x5...
+        const i2 = dynamicPathIndex * 2 + 2; // x2, x4, x6...
+        const dynParams: Record<string, number> = {
+          [`x${i1}`]: seg.start_x,
+          [`y${i1}`]: seg.start_y,
+          [`x${i2}`]: seg.end_x,
+          [`y${i2}`]: seg.end_y,
+        };
+        
         await devsFirePost("/setDynamicIgnition/", userToken, {
           teamNum: team.team_name,
-          ...dyn,
+          ...dynParams,
           speed: seg.speed,
           mode: mapIgnitionMode(seg.mode),
           distance: seg.distance ?? undefined,
         });
+        
+        dynamicPathIndex++;
       }
     }
     if (pointCols.length > 0) {
@@ -207,6 +254,7 @@ export async function executeDevsFireSimulation(
     }
   }
 
+  // DEVS-FIRE time scale: 1 timestep = roughly 1 second of real fire spread
   const timeSteps = Math.max(1, Math.min(100_000, Math.floor(simulationHours)));
   const runData = await devsFirePost("/runSimulation/", userToken, {
     time: timeSteps,

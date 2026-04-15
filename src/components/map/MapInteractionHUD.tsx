@@ -10,6 +10,7 @@ const INSTRUCTIONS: Record<NonNullable<MapInteractionMode>, string> = {
   polyline: "Click to add nodes along the fuel break path — press Escape to finish",
   polygon: "Click to add boundary nodes — double-click to close the polygon",
   rect: "Click to set the first corner, then click again to set the opposite corner",
+  "place-square": "Move cursor to position the boundary square, then click to place it",
 };
 
 export function MapInteractionHUD({

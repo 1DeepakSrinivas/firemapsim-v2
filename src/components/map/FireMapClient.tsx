@@ -16,6 +16,7 @@ import { PlanScenarioLayer } from "./PlanScenarioLayer";
 import {
   aspectColorForCell,
   fuelColorForCell,
+  fuelLabelForCell,
   slopeColorForCell,
 } from "@/lib/terrainLegend";
 import type { TerrainData, TerrainLayer } from "./MapOverlayPanels";
@@ -94,6 +95,10 @@ export type FireMapClientProps = {
    * Do not infer from `interactionMode` alone (line mode was shared between ignition and fuel-break).
    */
   interactionPalette?: "fuel-break" | "location" | "ignition";
+  /** Width of the place-square boundary in meters (used when interactionMode === 'place-square') */
+  squareWidthM?: number;
+  /** Height of the place-square boundary in meters. Defaults to squareWidthM. */
+  squareHeightM?: number;
 };
 
 // ─── Project boundary layer ───────────────────────────────────────────────────
@@ -473,7 +478,7 @@ function CellInfoCursor({
       {info.fuel !== undefined && (
         <div className="flex items-center justify-between gap-3">
           <span className="text-[10px] text-white/50">Fuel model</span>
-          <span className="text-[10px] font-semibold text-orange-300">{info.fuel}</span>
+          <span className="text-[10px] font-semibold text-orange-300">{fuelLabelForCell(info.fuel)}</span>
         </div>
       )}
       {info.slope !== undefined && (
@@ -531,6 +536,8 @@ export default function FireMapClient({
   onValidationFail,
   scenarioPlan = null,
   interactionPalette = "ignition",
+  squareWidthM,
+  squareHeightM,
 }: FireMapClientProps) {
   const perimeter = useMemo(() => toPolylinePositions(perimeterGeoJSON), [perimeterGeoJSON]);
   const tile = TILE_LAYERS[mapStyle];
@@ -601,6 +608,8 @@ export default function FireMapClient({
           onRect={onRect}
           validateLatLng={validateLatLng}
           onValidationFail={onValidationFail}
+          squareWidthM={squareWidthM}
+          squareHeightM={squareHeightM}
         />
 
         {perimeter.length > 1 && (

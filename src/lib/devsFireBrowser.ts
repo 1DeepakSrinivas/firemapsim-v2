@@ -1,6 +1,6 @@
 /**
  * Browser-side DEVS-FIRE calls via `/api/devs-fire` proxy.
- * Sequence mirrors `runDevsFireFromPlan`: connect → setMultiParameters → setCellSpaceLocation →
+ * Sequence mirrors `runDevsFireFromPlan`: connect → setCellResolution → setCellSpaceLocation →
  * setWindCondition, then getCellFuel / getCellSlope / getCellAspect.
  * GSU docs: “If using the online fuel data, then the location must be picked” via
  * `setCellSpaceLocation` before terrain matrices are valid.
@@ -101,21 +101,15 @@ export function effectiveDevsFireLatLng(plan: IgnitionPlan): { lat: number; lng:
 }
 
 /** Aligns the server-side grid with the current project + weather (required before terrain matrices are meaningful). */
-export async function setDevsFireMultiParameters(
+export async function setDevsFireCellResolution(
   token: string,
   plan: IgnitionPlan,
-  weather: WeatherValues,
 ): Promise<void> {
-  const { lat, lng } = effectiveDevsFireLatLng(plan);
   const cellDimension = Math.max(plan.cellSpaceDimension, plan.cellSpaceDimensionLat);
   await postDevsFireProxy({
-    path: "/setMultiParameters/",
+    path: "/setCellResolution/",
     token,
     params: {
-      lat,
-      lng,
-      windSpeed: weather.windSpeed,
-      windDirection: weather.windDirection,
       cellResolution: plan.cellResolution,
       cellDimension,
     },
@@ -149,7 +143,7 @@ export async function bootstrapTerrainSession(
   }
 
   const token = await connectDevsFire();
-  await setDevsFireMultiParameters(token, plan, weather);
+  await setDevsFireCellResolution(token, plan);
 
   await postDevsFireProxy({
     path: "/setCellSpaceLocation/",
