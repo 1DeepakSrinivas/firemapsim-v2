@@ -59,8 +59,20 @@ const INITIAL_TERRAIN: TerrainOverlayState = {
   showCellInfo: false,
 };
 
+const DEFAULT_SIMULATION_TIMESTEPS = 12000;
+const MAX_SIMULATION_TIMESTEPS = 100000;
+const TIMESTEPS_PER_HOUR = 500;
+
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function clampSimulationTimesteps(value: number): number {
+  return Math.max(1, Math.min(MAX_SIMULATION_TIMESTEPS, Math.round(value)));
+}
+
+function legacyHoursToTimesteps(hours: number): number {
+  return clampSimulationTimesteps(hours * TIMESTEPS_PER_HOUR);
 }
 
 function messageToText(message: UIMessage): string {
@@ -263,6 +275,7 @@ export function ProjectWorkspace({
   const handleStartSimulation = useCallback(
     async (simulationTimesteps: number) => {
       if (simulationRun.status === "running") return;
+      const requestedTimesteps = clampSimulationTimesteps(simulationTimesteps);
       clearReplayTimers();
       setReplayFrame(null);
       setIsReplayAnimating(false);
@@ -279,7 +292,7 @@ export function ProjectWorkspace({
         windDegree: weather.windDirection,
         temperature: weather.temperature,
         humidity: weather.humidity,
-        total_sim_time: simulationTimesteps,
+        total_sim_time: requestedTimesteps,
       };
 
       try {
@@ -288,7 +301,8 @@ export function ProjectWorkspace({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             plan: planPayload,
-            simulationHours: simulationTimesteps,
+            // Legacy request key expected by the route schema; value is timesteps.
+            simulationHours: requestedTimesteps,
             weatherOverrides,
           }),
         });
@@ -616,14 +630,21 @@ export function ProjectWorkspace({
     }
   }, []);
 
-  const handleRunTrigger = useCallback((trigger: RunTrigger) => {
-    if (trigger.action !== "run-simulation") return;
-    const requested =
-      typeof trigger.simulationHours === "number" && Number.isFinite(trigger.simulationHours)
-        ? Math.max(1, Math.min(72, Math.round(trigger.simulationHours)))
-        : 24;
-    void handleStartSimulation(requested);
-  }, [handleStartSimulation]);
+  const handleRunTrigger = useCallback(
+    (trigger: RunTrigger) => {
+      if (trigger.action !== "run-simulation") return;
+      const requested =
+        typeof trigger.simulationTimesteps === "number" &&
+        Number.isFinite(trigger.simulationTimesteps)
+          ? clampSimulationTimesteps(trigger.simulationTimesteps)
+          : typeof trigger.simulationHours === "number" &&
+              Number.isFinite(trigger.simulationHours)
+            ? legacyHoursToTimesteps(trigger.simulationHours)
+            : DEFAULT_SIMULATION_TIMESTEPS;
+      void handleStartSimulation(requested);
+    },
+    [handleStartSimulation],
+  );
 
   const fetchWeatherForCoords = useCallback(async (lat: number, lng: number) => {
     try {
@@ -818,7 +839,12 @@ export function ProjectWorkspace({
       const mode = mapInteractionMode;
       if (mode === "polygon") return true;
       if (mode === "polyline" && pendingActionRef.current === "fuel-break") return true;
-      if (mode === "rect" && pendingActionRef.current === "location") return true;
+      if (
+        (mode === "rect" || mode === "place-square") &&
+        pendingActionRef.current === "location"
+      ) {
+        return true;
+      }
       const b = projectConfig.boundaryGeoJSON;
       if (!b) return true;
       return pointInBoundary(latlng.lat, latlng.lng, b);
@@ -968,6 +994,7 @@ export function ProjectWorkspace({
     const cx = projectConfig.proj_center_lng;
     const cy = projectConfig.proj_center_lat;
     const metersPerDeg = 111320;
+    const cosLat = Math.cos((cy * Math.PI) / 180);
     const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
     const toGrid = (ll: import("leaflet").LatLng) => {
       const dx = (ll.lng - cx) * metersPerDeg * cosLat;

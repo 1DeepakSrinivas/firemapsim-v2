@@ -14,6 +14,8 @@ export type SetupUpdate = {
 
 export type RunTrigger = {
   action: "run-simulation";
+  simulationTimesteps?: number;
+  /** Legacy field name; interpreted as hours in trigger handling. */
   simulationHours?: number;
 };
 

@@ -1820,7 +1820,11 @@ type MapOverlayPanelsProps = {
   weather: WeatherValues;
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
   onWeatherFetched?: (next: WeatherValues) => void;
-  onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }) => void;
+  onWeatherFetchedAtCoords?: (
+    next: WeatherValues,
+    coords: { lat: number; lng: number },
+    label?: string,
+  ) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
   onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
   onLocationSearchPreview?: (

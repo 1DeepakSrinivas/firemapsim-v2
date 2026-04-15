@@ -410,13 +410,6 @@ export function MapInteractionLayer({
         const bounds = squareBoundsFromCenter(e.latlng);
         rectPreviewRef.current?.remove();
         rectPreviewRef.current = null;
-        // Draw a solid committed rectangle
-        L.rectangle(bounds, {
-          color: "#f97316",
-          weight: 2.5,
-          fillColor: "#f97316",
-          fillOpacity: 0.12,
-        }).addTo(map);
         onRect?.(bounds.getSouthWest(), bounds.getNorthEast());
       }
 
