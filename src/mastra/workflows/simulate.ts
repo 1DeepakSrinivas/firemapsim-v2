@@ -1,7 +1,7 @@
 import { createStep, createWorkflow } from "@mastra/core/workflows";
 import z from "zod";
 
-import { runSimulationWithDynamicWeather } from "@/lib/api/devsFireBackend";
+import { executeDevsFireSimulation } from "@/lib/runDevsFireFromPlan";
 import type { IgnitionPlan } from "@/types/ignitionPlan";
 
 import { connectToServer } from "@/mastra/tools/devsFire/connectToServer";
@@ -244,7 +244,7 @@ const prepBranchStep = createStep({
       data: {
         stage: "prep",
         ready: true,
-        devsFireNext: fromPlan ? "runSimulationWithDynamicWeather" : "legacy-connect-run",
+        devsFireNext: fromPlan ? "executeDevsFireSimulation" : "legacy-connect-run",
       },
       transient: true,
     });
@@ -277,12 +277,11 @@ const runStep = createStep({
       prepBranch.prep.devsFireConfigured &&
       plan.team_infos?.some((t) => t.details.length > 0)
     ) {
-      const output = await runSimulationWithDynamicWeather({
+      const result = await executeDevsFireSimulation({
         plan,
+        weather: init.weather,
         simulationHours: init.simulationHours,
-        weatherOverrides: init.weather,
       });
-      const { result } = output;
 
       await writer?.custom({
         type: "data-simulation-progress",
@@ -294,7 +293,7 @@ const runStep = createStep({
         userToken: result.userToken,
         operations: result.operations,
         bbox: result.bbox,
-        weatherSource: result.weatherSource,
+        weatherSource: "scenario" as const,
       };
     }
 

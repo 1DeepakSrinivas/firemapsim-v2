@@ -830,10 +830,10 @@ export function ProjectWorkspace({
       pendingActionRef.current === "fuel-break"
         ? {
             action: "fuel-break",
-            x1: Math.min(s.x, e.x),
-            y1: Math.min(s.y, e.y),
-            x2: Math.max(s.x, e.x),
-            y2: Math.max(s.y, e.y),
+            x1: s.x,
+            y1: s.y,
+            x2: e.x,
+            y2: e.y,
           }
         : {
             action: "line-ignition",
@@ -909,10 +909,10 @@ export function ProjectWorkspace({
       const e = toGrid(nodes[i + 1]!);
       const payload: ActionPayload = {
         action: "fuel-break",
-        x1: Math.min(s.x, e.x),
-        y1: Math.min(s.y, e.y),
-        x2: Math.max(s.x, e.x),
-        y2: Math.max(s.y, e.y),
+        x1: s.x,
+        y1: s.y,
+        x2: e.x,
+        y2: e.y,
       };
       setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     }

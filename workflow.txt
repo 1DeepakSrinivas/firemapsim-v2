@@ -1,0 +1,29 @@
+Workflow:
+
+Agentic:
+- Via Chat:
+    - Chat with the agent to get the information you need
+    - Agent gathers all the information you need sequentially
+    - Agent then creates the simulation plan (as per Devs-Fire API Requirements)
+    - Agent in conjuction also gathers location information from the map and the address (depending on what the user chooses to do)
+    - Agent in conjuction also gathers weather information from the open-meteo API
+    - Agent then creates the simulation plan (as per Devs-Fire API Requirements)
+    - Passes it onto the execution workflow
+    - Execution workflow runs the simulation and returns the results
+    - Results are displayed to the user
+    - User can then view the results in the UI
+
+Non-Agentic:
+- User provides all information manually
+- User creates the simulation plan (as per Devs-Fire API Requirements) via UI - Every UI step adds information to the simulation plan (returned as a JSON object)
+- Passes it onto the execution workflow
+- Execution workflow runs the simulation and returns the results
+- Results are displayed to the user via UI
+
+Execution Workflow:
+- Takes the simulation plan as input
+- Runs the simulation and returns the results
+- Returns the results to the user via UI
+
+UI:
+- User interface for the application
