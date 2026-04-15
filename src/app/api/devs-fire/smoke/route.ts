@@ -9,16 +9,34 @@ import {
 export const runtime = "nodejs";
 
 function parseToken(data: unknown): string {
+  const isHtmlLikeToken = (value: string): boolean => {
+    const trimmed = value.trimStart().toLowerCase();
+    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+  };
+
   if (typeof data === "string") {
     const token = data.trim();
-    if (token.length > 0) return token;
+    if (token.length > 0) {
+      if (isHtmlLikeToken(token)) {
+        throw new Error(
+          "connectToServer returned HTML instead of token; check DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
+        );
+      }
+      return token;
+    }
   }
 
   if (data && typeof data === "object") {
     const value = data as Record<string, unknown>;
     const token = value.token ?? value.userToken;
     if (typeof token === "string" && token.trim().length > 0) {
-      return token.trim();
+      const trimmed = token.trim();
+      if (isHtmlLikeToken(trimmed)) {
+        throw new Error(
+          "connectToServer returned HTML instead of token; check DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
+        );
+      }
+      return trimmed;
     }
   }
 

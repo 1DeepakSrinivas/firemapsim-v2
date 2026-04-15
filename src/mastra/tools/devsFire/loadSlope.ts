@@ -18,7 +18,9 @@ export const loadSlope = createTool({
       return await devsFirePost(
         "/loadSlope/",
         userToken,
-        {},
+        {
+          slopeMap: fileName,
+        },
         fileContent,
         {
           "Content-Type": "text/plain",

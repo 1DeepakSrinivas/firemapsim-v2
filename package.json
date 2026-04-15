@@ -8,6 +8,7 @@
     "dev:mastra": "mastra dev",
     "build": "next build",
     "start": "next start",
+    "devsfire:connect": "bun scripts/devsfire-connect.mjs",
     "test": "bun test"
   },
   "dependencies": {

@@ -21,7 +21,7 @@ export type TeamInfo = {
   details: SegmentDetail[];
 };
 
-/** Suppression / fuel-break region in grid space (axis-aligned rectangle or degenerate line as x1=x2 or y1=y2) */
+/** Suppression / fuel-break segment in grid space (single cell when start=end). */
 export type SupInfo = {
   x1: number;
   y1: number;
@@ -359,18 +359,34 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
       return { ...plan, team_infos: nextTeams };
     }
     case "fuel-break": {
-      const minX = Math.min(payload.x1, payload.x2);
-      const maxX = Math.max(payload.x1, payload.x2);
-      const minY = Math.min(payload.y1, payload.y2);
-      const maxY = Math.max(payload.y1, payload.y2);
       const pieces: SupInfo[] = payload.splitIntoRectangleEdges
         ? [
-            { x1: minX, y1: minY, x2: maxX, y2: minY },
-            { x1: minX, y1: maxY, x2: maxX, y2: maxY },
-            { x1: minX, y1: minY, x2: minX, y2: maxY },
-            { x1: maxX, y1: minY, x2: maxX, y2: maxY },
+            {
+              x1: Math.min(payload.x1, payload.x2),
+              y1: Math.min(payload.y1, payload.y2),
+              x2: Math.max(payload.x1, payload.x2),
+              y2: Math.min(payload.y1, payload.y2),
+            },
+            {
+              x1: Math.min(payload.x1, payload.x2),
+              y1: Math.max(payload.y1, payload.y2),
+              x2: Math.max(payload.x1, payload.x2),
+              y2: Math.max(payload.y1, payload.y2),
+            },
+            {
+              x1: Math.min(payload.x1, payload.x2),
+              y1: Math.min(payload.y1, payload.y2),
+              x2: Math.min(payload.x1, payload.x2),
+              y2: Math.max(payload.y1, payload.y2),
+            },
+            {
+              x1: Math.max(payload.x1, payload.x2),
+              y1: Math.min(payload.y1, payload.y2),
+              x2: Math.max(payload.x1, payload.x2),
+              y2: Math.max(payload.y1, payload.y2),
+            },
           ]
-        : [{ x1: minX, y1: minY, x2: maxX, y2: maxY }];
+        : [{ x1: payload.x1, y1: payload.y1, x2: payload.x2, y2: payload.y2 }];
       const sup_infos = [...plan.sup_infos, ...pieces];
       return {
         ...plan,

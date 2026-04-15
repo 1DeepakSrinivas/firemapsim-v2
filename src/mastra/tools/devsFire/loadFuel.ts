@@ -18,7 +18,9 @@ export const loadFuel = createTool({
       return await devsFirePost(
         "/loadFuel/",
         userToken,
-        {},
+        {
+          fuelMap: fileName,
+        },
         fileContent,
         {
           "Content-Type": "text/plain",

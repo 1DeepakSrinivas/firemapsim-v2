@@ -18,7 +18,9 @@ export const loadAspect = createTool({
       return await devsFirePost(
         "/loadAspect/",
         userToken,
-        {},
+        {
+          aspectMap: fileName,
+        },
         fileContent,
         {
           "Content-Type": "text/plain",
