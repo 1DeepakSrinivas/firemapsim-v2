@@ -153,11 +153,13 @@ export function ProjectWorkspace({
     lng: number;
     boundaryGeoJSON: BoundaryGeoJSON;
   } | null>(null);
+  const [weatherStatus, setWeatherStatus] = useState<string | null>(null);
 
   const [projectTitle, setProjectTitle] = useState(`Untitled project - ${randomSuffix()}`);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [titleEditing, setTitleEditing] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [projectMissing, setProjectMissing] = useState(false);
   const [titleDraft, setTitleDraft] = useState(projectTitle);
 
@@ -235,11 +237,11 @@ export function ProjectWorkspace({
             setIsReplayAnimating(false);
             setReplayFrame(null);
           }
-        }, i * 72);
+        }, (i * 72) / playbackRate);
         replayTimersRef.current.push(id);
       });
     },
-    [clearReplayTimers],
+    [clearReplayTimers, playbackRate],
   );
 
   useEffect(() => {
@@ -264,6 +266,7 @@ export function ProjectWorkspace({
       clearReplayTimers();
       setReplayFrame(null);
       setIsReplayAnimating(false);
+      setLastSimulationSnapshot(null); // Reset stats modal immediately
       if (readyBadgeTimerRef.current) {
         clearTimeout(readyBadgeTimerRef.current);
         readyBadgeTimerRef.current = null;
@@ -354,6 +357,11 @@ export function ProjectWorkspace({
       runReplayAnimation,
     ],
   );
+
+  const handleReplay = useCallback(() => {
+    if (!lastSimulationSnapshot) return;
+    runReplayAnimation(lastSimulationSnapshot.overlay);
+  }, [lastSimulationSnapshot, runReplayAnimation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -617,12 +625,55 @@ export function ProjectWorkspace({
     void handleStartSimulation(requested);
   }, [handleStartSimulation]);
 
-  const handleActionConfirm = useCallback((payload: ActionPayload) => {
-    setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
-    if (payload.action === "location") {
-      setLocationSearchPreview(null);
+  const fetchWeatherForCoords = useCallback(async (lat: number, lng: number) => {
+    try {
+      const res = await fetch(`/api/weather/zip?lat=${lat}&lng=${lng}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (res.ok && json.weather) {
+        setWeather(mergeWeather(json.weather, weatherOverridesRef.current));
+        if (json.placeLabel) {
+          setWeatherStatus(`Weather for ${json.placeLabel} fetched`);
+        }
+      }
+    } catch (e) {
+      console.error("Auto weather fetch failed", e);
     }
   }, []);
+
+  const handleActionConfirm = useCallback((payload: ActionPayload) => {
+    if (payload.action === "location") {
+      // When re-setting location, wipe all project data except chat.
+      // Start from a fresh plan, then merge the new location in.
+      const fresh = defaultIgnitionPlan();
+      // Preserve cell grid settings the user may have configured:
+      fresh.cellResolution = projectConfig.cellResolution;
+      fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
+      fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
+      // Preserve weather:
+      fresh.windSpeed = weather.windSpeed;
+      fresh.windDegree = weather.windDirection;
+      fresh.temperature = weather.temperature;
+      fresh.humidity = weather.humidity;
+
+      const merged = mergeActionIntoPlan(fresh, payload);
+      setProjectConfig(merged);
+      setLocationSearchPreview(null);
+      // Clear terrain, simulation results, and replay state
+      setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
+      setLastSimulationSnapshot(null);
+      clearReplayTimers();
+      setReplayFrame(null);
+      setIsReplayAnimating(false);
+      setSimulationRun({ status: "idle", error: null });
+      
+      // Automatic weather fetch for the new project center
+      void fetchWeatherForCoords(payload.proj_center_lat, payload.proj_center_lng);
+    } else {
+      setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+    }
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers, fetchWeatherForCoords]);
 
   const handleSegmentEdit = useCallback((edit: SegmentEdit) => {
     setProjectConfig((prev) => applySegmentEdit(prev, edit));
@@ -776,6 +827,7 @@ export function ProjectWorkspace({
   );
 
   const hasProjectLocation = !!projectConfig.boundaryGeoJSON;
+  const hasSimulationResults = lastSimulationSnapshot !== null;
   const totalSegmentCount = projectConfig.team_infos.reduce(
     (n, team) => n + team.details.length,
     0,
@@ -795,8 +847,9 @@ export function ProjectWorkspace({
     const metersPerDeg = 111320;
     const dx = (latlng.lng - cx) * metersPerDeg * Math.cos((cy * Math.PI) / 180);
     const dy = (latlng.lat - cy) * metersPerDeg;
-    const gx = Math.round(dx / cellRes + (projectConfig.cellSpaceDimension / 2));
-    const gy = Math.round(dy / cellRes + (projectConfig.cellSpaceDimensionLat / 2));
+    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
+    const gx = Math.round(dx / cellRes + maxDim / 2);
+    const gy = Math.round(dy / cellRes + maxDim / 2);
     const payload: ActionPayload = {
       action: "point-ignition",
       points: [{ x: gx, y: gy, speed: 0.6, mode: "point_static" }],
@@ -820,9 +873,10 @@ export function ProjectWorkspace({
     const cy = projectConfig.proj_center_lat;
     const metersPerDeg = 111320;
     const cosLat = Math.cos((cy * Math.PI) / 180);
+    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
     const toGrid = (ll: import("leaflet").LatLng) => ({
-      x: Math.round(((ll.lng - cx) * metersPerDeg * cosLat) / cellRes + projectConfig.cellSpaceDimension / 2),
-      y: Math.round(((ll.lat - cy) * metersPerDeg) / cellRes + projectConfig.cellSpaceDimensionLat / 2),
+      x: Math.round(((ll.lng - cx) * metersPerDeg * cosLat) / cellRes + maxDim / 2),
+      y: Math.round(((ll.lat - cy) * metersPerDeg) / cellRes + maxDim / 2),
     });
     const s = toGrid(start);
     const e = toGrid(end);
@@ -876,11 +930,26 @@ export function ProjectWorkspace({
         proj_center_lat: centerLat,
         boundaryGeoJSON,
       };
-      setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+      // Wipe all scenario data (same as handleActionConfirm for location)
+      const fresh = defaultIgnitionPlan();
+      fresh.cellResolution = projectConfig.cellResolution;
+      fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
+      fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
+      fresh.windSpeed = weather.windSpeed;
+      fresh.windDegree = weather.windDirection;
+      fresh.temperature = weather.temperature;
+      fresh.humidity = weather.humidity;
+      setProjectConfig(mergeActionIntoPlan(fresh, payload));
       setLocationSearchPreview(null);
+      setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
+      setLastSimulationSnapshot(null);
+      clearReplayTimers();
+      setReplayFrame(null);
+      setIsReplayAnimating(false);
+      setSimulationRun({ status: "idle", error: null });
     }
     setMapInteractionMode(null);
-  }, [projectConfig, pushInteractionHint]);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers, pushInteractionHint]);
 
   const handlePolyline = useCallback((nodes: import("leaflet").LatLng[]) => {
     pendingActionRef.current = null;
@@ -899,11 +968,15 @@ export function ProjectWorkspace({
     const cx = projectConfig.proj_center_lng;
     const cy = projectConfig.proj_center_lat;
     const metersPerDeg = 111320;
-    const cosLat = Math.cos((cy * Math.PI) / 180);
-    const toGrid = (ll: import("leaflet").LatLng) => ({
-      x: Math.round(((ll.lng - cx) * metersPerDeg * cosLat) / cellRes + projectConfig.cellSpaceDimension / 2),
-      y: Math.round(((ll.lat - cy) * metersPerDeg) / cellRes + projectConfig.cellSpaceDimensionLat / 2),
-    });
+    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
+    const toGrid = (ll: import("leaflet").LatLng) => {
+      const dx = (ll.lng - cx) * metersPerDeg * cosLat;
+      const dy = (ll.lat - cy) * metersPerDeg;
+      return {
+        x: Math.round(dx / cellRes + maxDim / 2),
+        y: Math.round(dy / cellRes + maxDim / 2),
+      };
+    };
     for (let i = 0; i < nodes.length - 1; i++) {
       const s = toGrid(nodes[i]!);
       const e = toGrid(nodes[i + 1]!);
@@ -935,10 +1008,25 @@ export function ProjectWorkspace({
       proj_center_lat: avgLat,
       boundaryGeoJSON,
     };
-    setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+    // Wipe all scenario data (same as handleRect / handleActionConfirm for location)
+    const fresh = defaultIgnitionPlan();
+    fresh.cellResolution = projectConfig.cellResolution;
+    fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
+    fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
+    fresh.windSpeed = weather.windSpeed;
+    fresh.windDegree = weather.windDirection;
+    fresh.temperature = weather.temperature;
+    fresh.humidity = weather.humidity;
+    setProjectConfig(mergeActionIntoPlan(fresh, payload));
     setLocationSearchPreview(null);
+    setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
+    setLastSimulationSnapshot(null);
+    clearReplayTimers();
+    setReplayFrame(null);
+    setIsReplayAnimating(false);
+    setSimulationRun({ status: "idle", error: null });
     setMapInteractionMode(null);
-  }, []);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers]);
 
   const handleRequestMapInteraction = useCallback(
     (mode: MapInteractionMode, action?: "location" | "fuel-break") => {
@@ -946,12 +1034,20 @@ export function ProjectWorkspace({
       if (action === "fuel-break") setInteractionPalette("fuel-break");
       else if (action === "location") setInteractionPalette("location");
       else setInteractionPalette("ignition");
-      setMapInteractionMode(mode);
-      if (mode === "rect" && action === "location") {
+
+      // For location, always use place-square so the user clicks once to drop
+      // a pre-sized grid square rather than free-hand drawing a rectangle.
+      const resolvedMode: MapInteractionMode =
+        action === "location" ? "place-square" : mode;
+
+      setMapInteractionMode(resolvedMode);
+
+      if (resolvedMode === "place-square" && action === "location") {
+        const cellSide = projectConfig.cellSpaceDimension;
+        const res = projectConfig.cellResolution;
+        const km = Math.round((cellSide * res) / 1000);
         setInteractionHint(
-          locationSearchPreview
-            ? "Draw two opposite corners for your project area. Green shows your search—your rectangle sets the simulation boundary."
-            : "Draw two opposite corners for your project working area.",
+          `Move the cursor to position your ${cellSide}×${cellSide}-cell boundary square (${km} km side), then click to place it.`,
         );
       } else if (mode === "polyline" && action === "fuel-break") {
         setInteractionHint("Click nodes for the fuel-break path, then press Escape to finish.");
@@ -959,7 +1055,7 @@ export function ProjectWorkspace({
         setInteractionHint("Click start point, then end point to place a fuel-break segment.");
       }
     },
-    [locationSearchPreview],
+    [locationSearchPreview, projectConfig.cellSpaceDimension, projectConfig.cellResolution],
   );
 
   useEffect(() => {
@@ -1078,6 +1174,11 @@ export function ProjectWorkspace({
             {saveStatus === "saved" && "Saved"}
             {saveStatus === "error" && "Save failed"}
           </span>
+          {weatherStatus && (
+            <span className="shrink-0 hidden md:inline text-[9px] text-orange-400/80 sm:text-[10px]">
+              • {weatherStatus}
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
@@ -1180,6 +1281,8 @@ export function ProjectWorkspace({
           }
           scenarioPlan={projectConfig}
           interactionPalette={interactionPalette}
+          squareWidthM={projectConfig.cellSpaceDimension * projectConfig.cellResolution}
+          squareHeightM={projectConfig.cellSpaceDimensionLat * projectConfig.cellResolution}
         />
 
         <FireOverlay points={effectiveOverlay} />
@@ -1193,10 +1296,12 @@ export function ProjectWorkspace({
             centerSet: hasProjectLocation,
           }}
           hasProjectLocation={hasProjectLocation}
+          hasSimulationResults={!!lastSimulationSnapshot}
           runActionsEnabled={runActionsEnabled}
           onStartSimulation={(timesteps) => {
             void handleStartSimulation(timesteps);
           }}
+          onReplay={handleReplay}
           onCommitPlanGridField={(field, value) => {
             setProjectConfig((prev) => ({ ...prev, [field]: value }));
           }}
@@ -1217,16 +1322,14 @@ export function ProjectWorkspace({
           }}
           onWeatherFetched={(next) => {
             setWeather(mergeWeather(next, weatherOverridesRef.current));
+            // Setting a generic status if we don't have the place label here
+            // Note: MapOverlayPanels will provide more specific hints locally
           }}
-          onWeatherFetchedAtCoords={(next, coords) => {
+          onWeatherFetchedAtCoords={(next, coords, label) => {
             setWeather(mergeWeather(next, weatherOverridesRef.current));
-            const payload: ActionPayload = {
-              action: "location",
-              proj_center_lng: coords.lng,
-              proj_center_lat: coords.lat,
-            };
-            setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
-            setLocationSearchPreview(null);
+            if (label) {
+              setWeatherStatus(`Weather for ${label} fetched`);
+            }
           }}
           onActionConfirm={handleActionConfirm}
           onLocationSearchPreview={setLocationSearchPreview}
@@ -1242,6 +1345,8 @@ export function ProjectWorkspace({
           terrainState={terrainState}
           onTerrainChange={handleTerrainChange}
           simulationRunning={simulationRun.status === "running"}
+          playbackRate={playbackRate}
+          onPlaybackRateChange={setPlaybackRate}
         />
 
         <MapInteractionHUD

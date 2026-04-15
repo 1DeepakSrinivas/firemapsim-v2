@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UIMessage } from "ai";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 
 import {
   ASPECT_LEGEND_CAPTION,
@@ -385,16 +386,23 @@ function RunConfigPanel({
   onResetProject,
   runActionsEnabled,
   simulationRunning,
+  hasResults,
+  onReplay,
+  playbackRate = 1,
+  onPlaybackRateChange,
 }: {
   onStartSimulation?: (simulationTimesteps: number) => void;
   onAskAgent?: () => void;
+  onReplay?: () => void;
   onResetProject?: () => void;
   /** Boundary set and at least one ignition (required to run or reset from this panel) */
   runActionsEnabled: boolean;
   simulationRunning?: boolean;
+  hasResults?: boolean;
+  playbackRate?: number;
+  onPlaybackRateChange?: (rate: number) => void;
 }) {
-  const [timesteps, setTimesteps] = useState(24);
-  const [playbackRate, setPlaybackRate] = useState(1);
+  const [timesteps, setTimesteps] = useState(12000);
   const [resetOpen, setResetOpen] = useState(false);
 
   return (
@@ -412,16 +420,16 @@ function RunConfigPanel({
           <div className="flex items-center gap-1 sm:gap-1.5">
             <button
               type="button"
-              onClick={() => setTimesteps((h) => Math.max(1, h - 1))}
-              className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+              onClick={() => setTimesteps((t) => Math.max(1000, t - 1000))}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
             >
               <Minus className="h-2.5 w-2.5" />
             </button>
-            <span className="w-8 text-center text-[10px] font-semibold text-white/80 sm:w-9 sm:text-[11px]">{timesteps}</span>
+            <span className="w-10 text-center text-[10px] font-semibold text-white/80 sm:w-12 sm:text-[11px]">{timesteps}</span>
             <button
               type="button"
-              onClick={() => setTimesteps((h) => Math.min(72, h + 1))}
-              className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-[11px] text-white/50 hover:border-white/20 hover:text-white/80"
+              onClick={() => setTimesteps((t) => Math.min(100_000, t + 1000))}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 text-[11px] text-white/50 hover:border-white/20 hover:text-white/80"
             >
               +
             </button>
@@ -440,7 +448,7 @@ function RunConfigPanel({
             max={4}
             step={0.25}
             value={playbackRate}
-            onChange={(e) => setPlaybackRate(Number(e.target.value))}
+            onChange={(e) => onPlaybackRateChange?.(Number(e.target.value))}
             className="w-full accent-orange-400"
           />
           <div className="flex justify-between text-[8px] text-white/20 sm:text-[9px]">
@@ -454,9 +462,9 @@ function RunConfigPanel({
         {/* Actions */}
         <div className="space-y-1 pt-0.5 sm:space-y-1.5">
           <ActionBtn
-            onClick={() => onStartSimulation?.(timesteps)}
-            label="Start Simulation"
-            icon={Play}
+            onClick={() => (hasResults ? onReplay?.() : onStartSimulation?.(timesteps))}
+            label={hasResults ? "Replay Simulation" : "Start Simulation"}
+            icon={hasResults ? RotateCcw : Play}
             variant="primary"
             disabled={!runActionsEnabled || simulationRunning}
             title={
@@ -487,14 +495,6 @@ function RunConfigPanel({
                 label="Reset project"
                 icon={RotateCcw}
                 variant="danger"
-                disabled={!runActionsEnabled || simulationRunning}
-                title={
-                  !runActionsEnabled
-                    ? "Set the project area and at least one point or line ignition first"
-                    : simulationRunning
-                      ? "Wait for simulation processing to finish"
-                      : undefined
-                }
               />
               <Dialog open={resetOpen} onOpenChange={setResetOpen}>
                 <DialogContent className="max-w-sm border-white/10 bg-[#141414] text-white shadow-xl">
@@ -579,12 +579,14 @@ function ScenarioPanel({
   onCommitGridField,
   mapRef,
   hasProjectLocation,
+  hasSimulationResults = false,
+  onReplay,
 }: {
   weather: WeatherValues;
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
   /** Applied to scenario state and mirrored into project config (simulation). */
   onWeatherFetched?: (next: WeatherValues) => void;
-  onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }) => void;
+  onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }, label?: string) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
   onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
   onLocationSearchPreview?: (
@@ -602,6 +604,11 @@ function ScenarioPanel({
   ) => void;
   mapRef?: import("leaflet").Map | null;
   hasProjectLocation: boolean;
+  /** True after a simulation has been run and results received. Location becomes locked. */
+  hasSimulationResults?: boolean;
+  onReplay?: () => void;
+  playbackRate?: number;
+  onPlaybackRateChange?: (rate: number) => void;
 }) {
   const [open, setOpen] = useState<DrawerId>("scenario");
   const [weatherQuery, setWeatherQuery] = useState("");
@@ -610,9 +617,20 @@ function ScenarioPanel({
   const [weatherFetchHint, setWeatherFetchHint] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<ActionId | null>(null);
   const [cellGridOpen, setCellGridOpen] = useState(false);
+  const [relocateConfirmOpen, setRelocateConfirmOpen] = useState(false);
+
+  // Location is locked once a simulation has been run and received.
+  const locationLocked = hasSimulationResults;
 
   function handleActionBtnClick(id: ActionId) {
-    if (id === "location" && hasProjectLocation) return;
+    if (id === "location") {
+      if (locationLocked) return;
+      if (hasProjectLocation) {
+        // Location already set but no simulation yet — confirm relocation
+        setRelocateConfirmOpen(true);
+        return;
+      }
+    }
     if (MAP_INTERACTION_ACTIONS.includes(id)) {
       if (!hasProjectLocation) return;
       if (id === "point-ignition") {
@@ -658,7 +676,7 @@ function ScenarioPanel({
         typeof json.lng === "number" &&
         onWeatherFetchedAtCoords
       ) {
-        onWeatherFetchedAtCoords(json.weather, { lat: json.lat, lng: json.lng });
+        onWeatherFetchedAtCoords(json.weather, { lat: json.lat, lng: json.lng }, json.placeLabel);
       }
       setWeatherFetchHint(
         json.placeLabel
@@ -689,21 +707,66 @@ function ScenarioPanel({
             <SectionLabel>Setup Actions</SectionLabel>
             <motion.div {...setupStep1Motion} className="space-y-1">
               <ActionBtn
-                label={hasProjectLocation ? "Project location set" : "Set Project Location"}
+                label={
+                  locationLocked
+                    ? "Location locked (simulation ran)"
+                    : hasProjectLocation
+                      ? "Change project location"
+                      : "Set Project Location"
+                }
                 icon={MapPin}
-                disabled={hasProjectLocation}
+                disabled={locationLocked}
                 title={
-                  hasProjectLocation
-                    ? "Only one project area per project. Use Reset project to choose a different location."
-                    : undefined
+                  locationLocked
+                    ? "Location cannot be changed after a simulation has been run. Reset project to start fresh."
+                    : hasProjectLocation
+                      ? "Change project location — all scenario data (ignitions, fuel breaks, terrain) will be reset"
+                      : undefined
                 }
                 onClick={() => handleActionBtnClick("location")}
               />
-              {hasProjectLocation ? (
+              {locationLocked ? (
                 <p className="text-[8px] leading-relaxed text-white/30 sm:text-[9px]">
-                  One location per project. Reset project to replace the area.
+                  Location locked after simulation. Use Reset project to start fresh.
+                </p>
+              ) : hasProjectLocation ? (
+                <p className="text-[8px] leading-relaxed text-amber-400/50 sm:text-[9px]">
+                  Changing location will reset ignitions, fuel breaks and terrain data.
                 </p>
               ) : null}
+
+              {/* Relocate confirmation dialog */}
+              <Dialog open={relocateConfirmOpen} onOpenChange={setRelocateConfirmOpen}>
+                <DialogContent className="max-w-sm border-white/10 bg-[#141414] text-white shadow-xl">
+                  <DialogTitle className="text-sm font-semibold tracking-tight text-white/90">
+                    Change project location?
+                  </DialogTitle>
+                  <DialogDescription className="text-[11px] leading-relaxed text-white/55">
+                    Moving to a new location will reset all scenario data including ignition lines, fuel breaks,
+                    terrain overlays, and simulation results. Your chat history will be preserved.
+                  </DialogDescription>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <DialogClose asChild>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:bg-white/10"
+                      >
+                        Cancel
+                      </button>
+                    </DialogClose>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRelocateConfirmOpen(false);
+                        setActiveAction("location");
+                      }}
+                      className="rounded-lg bg-amber-500/90 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-amber-600"
+                    >
+                      Change Location
+                    </button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </motion.div>
 
             <AnimatePresence initial={false}>
@@ -753,7 +816,7 @@ function ScenarioPanel({
             ) : null}
           </div>
 
-          {hasProjectLocation && plan && onCommitGridField ? (
+          {plan && onCommitGridField ? (
             <div className="border-t border-white/6 pt-2.5 sm:pt-3">
               <button
                 type="button"
@@ -782,14 +845,14 @@ function ScenarioPanel({
                   >
                     <div className="space-y-1.5 pt-1">
                       <p className="text-[8px] leading-relaxed text-white/30 sm:text-[9px]">
-                        Cell resolution (meters) and grid size in cells. DEVS-FIRE uses one square
-                        dimension equal to the larger of width/height when calling the API.
+                        Cell resolution and grid side length. These define the square project
+                        boundary. DEVS-FIRE uses a single square grid (N×N cells).
                       </p>
                       <div className="rounded-lg border border-white/8 bg-white/3 px-2 sm:px-3">
                         <InlineEdit
                           label="Cell resolution"
                           value={plan.cellResolution}
-                          suffix="m"
+                          suffix="m / cell"
                           onCommit={(v) =>
                             onCommitGridField(
                               "cellResolution",
@@ -798,26 +861,19 @@ function ScenarioPanel({
                           }
                         />
                         <InlineEdit
-                          label="Cells (E-W)"
+                          label="Cells (side)"
                           value={plan.cellSpaceDimension}
-                          onCommit={(v) =>
-                            onCommitGridField(
-                              "cellSpaceDimension",
-                              Math.max(10, Math.min(2000, Math.round(v))),
-                            )
-                          }
-                        />
-                        <InlineEdit
-                          label="Cells (N-S)"
-                          value={plan.cellSpaceDimensionLat}
-                          onCommit={(v) =>
-                            onCommitGridField(
-                              "cellSpaceDimensionLat",
-                              Math.max(10, Math.min(2000, Math.round(v))),
-                            )
-                          }
+                          onCommit={(v) => {
+                            const clamped = Math.max(10, Math.min(2000, Math.round(v)));
+                            onCommitGridField("cellSpaceDimension", clamped);
+                            onCommitGridField("cellSpaceDimensionLat", clamped);
+                          }}
                         />
                       </div>
+                      {/* Physical size hint */}
+                      <p className="text-[8px] text-white/25 sm:text-[9px]">
+                        ≈ {((plan.cellSpaceDimension * plan.cellResolution) / 1000).toFixed(1)} km × {((plan.cellSpaceDimension * plan.cellResolution) / 1000).toFixed(1)} km boundary
+                      </p>
                     </div>
                   </motion.div>
                 ) : null}
@@ -896,6 +952,7 @@ function ScenarioPanel({
         }}
         mapRef={mapRef}
         onLocationSearchPreview={onLocationSearchPreview}
+        currentPlan={plan}
       />
     </Panel>
   );
@@ -1086,6 +1143,16 @@ function TerrainDataPanel({
   }
 
   async function selectLayer(layer: TerrainLayer) {
+    if (state.show.has(layer)) {
+      onChange({
+        show: new Set(),
+        // Keep data so it doesn't refetch if toggled back soon, 
+        // or we could clear it. The request didn't specify clearing data,
+        // just unselecting the chosen terrain data.
+      });
+      return;
+    }
+
     onChange({
       show: new Set([layer]),
       data: {
@@ -1607,18 +1674,22 @@ function IgnitionParametersPanel({
   };
 
   return (
-    <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
-      <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
-        <Flame className="h-3 w-3 text-orange-400/70 sm:h-3.5 sm:w-3.5" />
-        <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
-          Ignition Parameters
-        </span>
-        <span className="ml-auto rounded-full bg-orange-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-orange-300">
-          {rows.length}
-        </span>
-      </div>
-
-      <div className="divide-y divide-white/5">
+    <Panel className="w-[160px] sm:w-[175px] md:w-[190px] p-0 flex flex-col">
+      <Accordion type="single" collapsible defaultValue="ignition" className="w-full">
+        <AccordionItem value="ignition" className="border-none">
+          <AccordionTrigger className="w-full px-2.5 py-1.5 sm:px-3 sm:py-2 hover:no-underline hover:bg-white/5 data-[state=open]:border-b data-[state=open]:border-white/6">
+            <div className="flex items-center gap-2 flex-1 text-left">
+              <Flame className="h-3 w-3 text-orange-400/70 sm:h-3.5 sm:w-3.5" />
+              <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
+                Ignition Parameters
+              </span>
+              <span className="ml-auto mr-2 rounded-full bg-orange-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-orange-300">
+                {rows.length}
+              </span>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="p-0">
+            <div className="divide-y divide-white/5">
         {lineRows.length > 0 && (
           <>
             <IgnitionGroupHeader label="Lines" count={lineRows.length} />
@@ -1631,7 +1702,10 @@ function IgnitionParametersPanel({
             {pointRows.map(renderRow)}
           </>
         )}
-      </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </Panel>
   );
 }
@@ -1649,18 +1723,22 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
   if (plan.sup_infos.length === 0) return null;
 
   return (
-    <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
-      <div className="flex items-center gap-2 border-b border-white/6 px-2.5 py-1.5 sm:px-3 sm:py-2">
-        <Shield className="h-3 w-3 text-sky-400/70 sm:h-3.5 sm:w-3.5" />
-        <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
-          Fuel Breaks
-        </span>
-        <span className="ml-auto rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-sky-300">
-          {plan.sup_infos.length}
-        </span>
-      </div>
-
-      <div className="divide-y divide-white/5">
+    <Panel className="w-[160px] sm:w-[175px] md:w-[190px] p-0 flex flex-col">
+      <Accordion type="single" collapsible defaultValue="fuel-breaks" className="w-full">
+        <AccordionItem value="fuel-breaks" className="border-none">
+          <AccordionTrigger className="w-full px-2.5 py-1.5 sm:px-3 sm:py-2 hover:no-underline hover:bg-white/5 data-[state=open]:border-b data-[state=open]:border-white/6">
+            <div className="flex items-center gap-2 flex-1 text-left">
+              <Shield className="h-3 w-3 text-sky-400/70 sm:h-3.5 sm:w-3.5" />
+              <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
+                Fuel Breaks
+              </span>
+              <span className="ml-auto mr-2 rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-sky-300">
+                {plan.sup_infos.length}
+              </span>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="p-0">
+            <div className="divide-y divide-white/5">
         {plan.sup_infos.map((rect, idx) => {
           const isOpen = openIdx === idx;
           const w = Math.abs(rect.x2 - rect.x1);
@@ -1723,7 +1801,10 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
             </div>
           );
         })}
-      </div>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
     </Panel>
   );
 }
@@ -1773,7 +1854,12 @@ type MapOverlayPanelsProps = {
     field: "cellResolution" | "cellSpaceDimension" | "cellSpaceDimensionLat",
     value: number,
   ) => void;
+  /** True after a simulation has been run and results received */
+  hasSimulationResults?: boolean;
   simulationRunning?: boolean;
+  onReplay?: () => void;
+  playbackRate?: number;
+  onPlaybackRateChange?: (rate: number) => void;
 };
 
 export function MapOverlayPanels({
@@ -1802,7 +1888,11 @@ export function MapOverlayPanels({
   onTerrainChange,
   runActionsEnabled = false,
   onCommitPlanGridField,
+  hasSimulationResults = false,
   simulationRunning = false,
+  onReplay,
+  playbackRate = 1,
+  onPlaybackRateChange,
 }: MapOverlayPanelsProps) {
   return (
     <>
@@ -1821,14 +1911,22 @@ export function MapOverlayPanels({
           onCommitGridField={onCommitPlanGridField}
           mapRef={mapRef}
           hasProjectLocation={hasProjectLocation}
+          hasSimulationResults={hasSimulationResults}
+          onReplay={onReplay}
+          playbackRate={playbackRate}
+          onPlaybackRateChange={onPlaybackRateChange}
         />
         <div className="flex flex-col gap-1.5 sm:gap-2">
           <RunConfigPanel
             onStartSimulation={onStartSimulation}
+            onReplay={onReplay}
+            hasResults={hasSimulationResults}
             onAskAgent={onAskAgent}
             onResetProject={onResetProject}
             runActionsEnabled={runActionsEnabled}
             simulationRunning={simulationRunning}
+            playbackRate={playbackRate}
+            onPlaybackRateChange={onPlaybackRateChange}
           />
           {projectConfig && onSegmentEdit && onSegmentDelete && onPointIgnitionEdit && (
             <IgnitionParametersPanel

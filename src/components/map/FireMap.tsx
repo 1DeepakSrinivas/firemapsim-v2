@@ -48,6 +48,8 @@ export type FireMapProps = {
   onValidationFail?: MapInteractionLayerProps["onValidationFail"];
   scenarioPlan?: IgnitionPlan | null;
   interactionPalette?: "fuel-break" | "location" | "ignition";
+  squareWidthM?: number;
+  squareHeightM?: number;
 };
 
 export default function FireMap({
@@ -76,6 +78,8 @@ export default function FireMap({
   onValidationFail,
   scenarioPlan,
   interactionPalette,
+  squareWidthM,
+  squareHeightM,
 }: FireMapProps) {
   const points = useMemo(() => fireOverlay ?? [], [fireOverlay]);
 
@@ -106,6 +110,8 @@ export default function FireMap({
       onValidationFail={onValidationFail}
       scenarioPlan={scenarioPlan}
       interactionPalette={interactionPalette}
+      squareWidthM={squareWidthM}
+      squareHeightM={squareHeightM}
     />
   );
 }

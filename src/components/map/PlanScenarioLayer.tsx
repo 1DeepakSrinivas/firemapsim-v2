@@ -88,7 +88,6 @@ export function PlanScenarioLayer({ plan }: { plan: IgnitionPlan }) {
         pathOptions={{
           color: FUEL_BREAK_COLOR,
           weight: 2.5,
-          dashArray: "5 5",
           opacity: 0.95,
         }}
       />

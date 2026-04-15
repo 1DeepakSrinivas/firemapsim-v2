@@ -581,6 +581,8 @@ function LocationModal({
   onLocationPreview,
   onRequestMapDraw,
   mapRef,
+  onConfirm,
+  currentPlan,
 }: {
   onClose: () => void;
   /** Updates map preview (green); does not commit project location */
@@ -591,6 +593,9 @@ function LocationModal({
   } | null) => void;
   onRequestMapDraw?: (mode: MapInteractionMode) => void;
   mapRef?: import("leaflet").Map | null;
+  onConfirm?: (payload: ActionPayload) => void;
+  /** Current plan — used to read cellResolution / cellSpaceDimension for auto-boundary sizing */
+  currentPlan?: import("@/types/ignitionPlan").IgnitionPlan | null;
 }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -688,15 +693,35 @@ function LocationModal({
           {result ? (
             <div className="space-y-2">
               <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
-                <p className="text-[10px] font-semibold text-emerald-400">Found — map preview only</p>
+                <p className="text-[10px] font-semibold text-emerald-400">Found</p>
                 <p className="mt-0.5 text-[11px] leading-snug text-white/70">{result.displayName}</p>
                 <p className="mt-1 text-[10px] text-white/35">
                   {result.lat.toFixed(5)}, {result.lng.toFixed(5)}
                 </p>
               </div>
-              <p className="text-[10px] leading-snug text-white/45">
-                The green outline or marker shows this search. To set the project area, draw a rectangle on the map
-                (below or use the button when ready).
+              <button
+                type="button"
+                onClick={() => {
+                  const payload: ActionPayload = {
+                    action: "location",
+                    proj_center_lng: result.lng,
+                    proj_center_lat: result.lat,
+                    // Pass through current grid settings so boundary is auto-sized
+                    ...(currentPlan ? {
+                      cellResolution: currentPlan.cellResolution,
+                      cellSpaceDimension: currentPlan.cellSpaceDimension,
+                      cellSpaceDimensionLat: currentPlan.cellSpaceDimensionLat,
+                    } : {}),
+                  };
+                  onConfirm?.(payload);
+                  onClose();
+                }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-orange-500/25 px-4 py-2 text-[11px] font-medium text-orange-200 transition hover:bg-orange-500/40"
+              >
+                Set as project location
+              </button>
+              <p className="text-[10px] leading-snug text-white/35">
+                This places a {currentPlan?.cellSpaceDimension ?? 200}×{currentPlan?.cellSpaceDimension ?? 200}-cell grid square ({((((currentPlan?.cellSpaceDimension ?? 200) * (currentPlan?.cellResolution ?? 30)) / 1000)).toFixed(1)} km) centered on the result. Or place it manually on the map below.
               </p>
             </div>
           ) : null}
@@ -705,7 +730,7 @@ function LocationModal({
         {/* Divider */}
         <div className="flex items-center gap-2">
           <div className="h-px flex-1 bg-white/8" />
-          <span className="text-[9px] uppercase tracking-wider text-white/25">or draw on map</span>
+          <span className="text-[9px] uppercase tracking-wider text-white/25">or place on map</span>
           <div className="h-px flex-1 bg-white/8" />
         </div>
 
@@ -713,10 +738,10 @@ function LocationModal({
         <div className="space-y-2">
           <DrawModeButton
             icon={RectangleHorizontal}
-            label="Draw project area (rectangle)"
-            description="Two opposite corners define your simulation boundary — required to finish setup"
+            label="Place boundary on map"
+            description={`Move cursor to position the ${currentPlan?.cellSpaceDimension ?? 200}×${currentPlan?.cellSpaceDimension ?? 200}-cell square, then click to place`}
             color="sky"
-            onClick={() => { onRequestMapDraw?.("rect"); onClose(); }}
+            onClick={() => { onRequestMapDraw?.("place-square" as import("./MapInteractionLayer").MapInteractionMode); onClose(); }}
           />
         </div>
       </div>
@@ -729,17 +754,6 @@ function LocationModal({
           className="rounded-lg px-3 py-1.5 text-[11px] text-white/50 transition hover:bg-white/5 hover:text-white/80"
         >
           Cancel
-        </button>
-        <button
-          type="button"
-          disabled={!result}
-          onClick={() => {
-            onRequestMapDraw?.("rect");
-            onClose();
-          }}
-          className="rounded-lg bg-orange-500/30 px-4 py-1.5 text-[11px] font-medium text-orange-100 transition hover:bg-orange-500/45 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Draw project rectangle
         </button>
       </div>
     </motion.div>
@@ -831,6 +845,8 @@ export type ActionModalProps = {
       boundaryGeoJSON: BoundaryGeoJSON;
     } | null,
   ) => void;
+  /** Current ignition plan — passed to LocationModal so it can read grid settings for auto-boundary */
+  currentPlan?: import("@/types/ignitionPlan").IgnitionPlan | null;
 };
 
 export function ActionModal({
@@ -840,6 +856,7 @@ export function ActionModal({
   onRequestMapDraw,
   mapRef,
   onLocationSearchPreview,
+  currentPlan,
 }: ActionModalProps) {
   const [tab, setTab] = useState<"agent" | "manual">("agent");
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
@@ -909,6 +926,8 @@ export function ActionModal({
               onLocationPreview={onLocationSearchPreview}
               onRequestMapDraw={onRequestMapDraw}
               mapRef={mapRef}
+              onConfirm={onConfirm}
+              currentPlan={currentPlan}
             />
           ) : actionId === "fuel-break" ? (
             <FuelBreakModal
