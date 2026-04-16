@@ -201,13 +201,22 @@ export async function executeDevsFireSimulation(
     windDirection: devsFireWindDirection,
   });
 
+  const suppressedChunkSize = 50;
   for (const sup of plan.sup_infos) {
-    await devsFirePost("/setSuppressedCell/", userToken, {
-      x1: sup.x1,
-      y1: sup.y1,
-      x2: sup.x2,
-      y2: sup.y2,
-    });
+    const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
+    for (let i = 0; i < points.length; i += suppressedChunkSize) {
+      const chunk = points.slice(i, i + suppressedChunkSize);
+      await Promise.all(
+        chunk.map((point) =>
+          devsFirePost("/setSuppressedCell/", userToken, {
+            x1: point.x,
+            y1: point.y,
+            x2: point.x,
+            y2: point.y,
+          }),
+        ),
+      );
+    }
   }
 
   for (const team of plan.team_infos) {
