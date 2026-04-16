@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
-  CircleMarker,
   MapContainer,
   Polyline,
   TileLayer,
@@ -220,7 +219,7 @@ function MapEventsBridge({
   return null;
 }
 
-function FireCircles({
+function FireCellOverlayLayer({
   points,
   cellResolution,
   cellSpaceDimension,
@@ -236,80 +235,67 @@ function FireCircles({
   projCenterLng?: number;
 }) {
   const map = useMap();
-  const bounds = map.getBounds();
-  const west = bounds.getWest();
-  const south = bounds.getSouth();
-  const east = bounds.getEast();
-  const north = bounds.getNorth();
+  useEffect(() => {
+    if (
+      typeof cellResolution !== "number" ||
+      cellResolution <= 0 ||
+      typeof cellSpaceDimension !== "number" ||
+      cellSpaceDimension <= 0 ||
+      typeof cellSpaceDimensionLat !== "number" ||
+      cellSpaceDimensionLat <= 0 ||
+      typeof projCenterLat !== "number" ||
+      typeof projCenterLng !== "number"
+    ) {
+      return;
+    }
 
-  const canUseGridMapping =
-    typeof cellResolution === "number" &&
-    cellResolution > 0 &&
-    typeof cellSpaceDimension === "number" &&
-    cellSpaceDimension > 0 &&
-    typeof cellSpaceDimensionLat === "number" &&
-    cellSpaceDimensionLat > 0 &&
-    typeof projCenterLat === "number" &&
-    typeof projCenterLng === "number";
+    let L: typeof import("leaflet");
+    const layers: import("leaflet").Rectangle[] = [];
 
-  const normalized = useMemo(() => {
-    const metersPerDeg = 111320;
-    const cosLat = Math.cos((((projCenterLat ?? 0) * Math.PI) / 180));
+    void import("leaflet").then((mod) => {
+      L = mod;
+      const cellRes = cellResolution;
+      const cellCols = cellSpaceDimension;
+      const cellRows = cellSpaceDimensionLat;
+      const centerLat = projCenterLat;
+      const centerLng = projCenterLng;
+      const metersPerDeg = 111320;
+      const cosLat = Math.cos((centerLat * Math.PI) / 180);
 
-    return points.map((point, index) => {
-      let lat = point.y;
-      let lng = point.x;
-
-      if (canUseGridMapping && Math.abs(cosLat) > 1e-9) {
-        const dxMeters = (point.x - (cellSpaceDimension! / 2)) * cellResolution!;
-        const dyMeters = (point.y - (cellSpaceDimensionLat! / 2)) * cellResolution!;
-        lng = projCenterLng! + dxMeters / (metersPerDeg * cosLat);
-        lat = projCenterLat! + dyMeters / metersPerDeg;
-      } else if (Math.abs(point.x) > 180 || Math.abs(point.y) > 90) {
-        const xNorm = Math.min(Math.max(point.x / 100, 0), 1);
-        const yNorm = Math.min(Math.max(point.y / 100, 0), 1);
-        lng = west + (east - west) * xNorm;
-        lat = south + (north - south) * yNorm;
+      function cellBounds(gx: number, gy: number): [[number, number], [number, number]] {
+        const dxMeters = (gx - cellCols / 2) * cellRes;
+        const dyMeters = (gy - cellRows / 2) * cellRes;
+        const lat = centerLat + dyMeters / metersPerDeg;
+        const lng = centerLng + dxMeters / (metersPerDeg * Math.max(cosLat, 1e-9));
+        const dLat = cellRes / metersPerDeg;
+        const dLng = cellRes / (metersPerDeg * Math.max(cosLat, 1e-9));
+        return [
+          [lat, lng],
+          [lat + dLat, lng + dLng],
+        ];
       }
 
-      return {
-        id: `${point.x}-${point.y}-${point.time}-${index}`,
-        lat,
-        lng,
-        state: point.state,
-      };
+      for (const point of points) {
+        if (point.state === "unburned") continue;
+        const fillColor = point.state === "burning" ? "#ef4444" : "#6b7280";
+        const rect = L.rectangle(cellBounds(point.x, point.y), {
+          color: "transparent",
+          fillColor,
+          fillOpacity: point.state === "burning" ? 0.92 : 0.72,
+          weight: 0,
+          interactive: false,
+          bubblingMouseEvents: false,
+        }).addTo(map);
+        layers.push(rect);
+      }
     });
-  }, [
-    canUseGridMapping,
-    cellResolution,
-    cellSpaceDimension,
-    cellSpaceDimensionLat,
-    east,
-    north,
-    points,
-    projCenterLat,
-    projCenterLng,
-    south,
-    west,
-  ]);
 
-  return (
-    <>
-      {normalized
-        .filter((p) => p.state !== "unburned")
-        .map((point) => {
-          const color = point.state === "burning" ? "#ef4444" : "#9ca3af";
-          return (
-            <CircleMarker
-              key={point.id}
-              center={[point.lat, point.lng]}
-              radius={5}
-              pathOptions={{ color, fillColor: color, fillOpacity: 0.8, weight: 1 }}
-            />
-          );
-        })}
-    </>
-  );
+    return () => {
+      layers.forEach((l) => l.remove());
+    };
+  }, [points, map, cellResolution, cellSpaceDimension, cellSpaceDimensionLat, projCenterLat, projCenterLng]);
+
+  return null;
 }
 
 // ─── Terrain overlay (colors from @/lib/terrainLegend) ───────────────────────
@@ -589,7 +575,7 @@ export default function FireMapClient({
             projCenterLng={projCenterLng}
           />
         )}
-        <FireCircles
+        <FireCellOverlayLayer
           points={fireOverlay}
           cellResolution={cellResolution}
           cellSpaceDimension={cellSpaceDimension}

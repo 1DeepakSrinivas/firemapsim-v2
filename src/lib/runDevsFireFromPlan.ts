@@ -85,7 +85,7 @@ export function planSegmentToDynamicIgnition(seg: {
 
 function mapIgnitionMode(mode: string): string {
   const m = mode.toLowerCase();
-  if (m.includes("spot")) return "spot";
+  if (m.includes("point") || m.includes("static") || m.includes("spot")) return "spot";
   return "continuous";
 }
 
@@ -228,9 +228,9 @@ export async function executeDevsFireSimulation(
     for (const seg of team.details) {
       const isPoint =
         seg.start_x === seg.end_x && seg.start_y === seg.end_y;
-      const isStatic = seg.mode.includes("_static");
+      const isStaticPoint = isPoint && seg.mode.includes("_static");
 
-      if (isPoint || isStatic) {
+      if (isStaticPoint) {
         if (isPoint) {
           pointCols.push(seg.start_x);
           pointRows.push(seg.start_y);
@@ -260,7 +260,10 @@ export async function executeDevsFireSimulation(
           ...dynParams,
           speed: seg.speed,
           mode: mapIgnitionMode(seg.mode),
-          distance: seg.distance ?? undefined,
+          distance:
+            seg.mode === "continuous_static"
+              ? (seg.distance && seg.distance > 0 ? seg.distance : 5)
+              : seg.distance ?? undefined,
         });
 
         dynamicPathIndex++;

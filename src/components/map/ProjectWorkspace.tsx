@@ -5,7 +5,7 @@ import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Flame, Home, Play } from "lucide-react";
+import { Flame, Home, Pause, Play } from "lucide-react";
 
 import {
   CedarCaptionChat,
@@ -14,7 +14,6 @@ import {
 } from "@/chatComponents/CedarCaptionChat";
 import { ProjectAgentChatHost } from "@/components/map/ProjectAgentChatHost";
 import FireMap from "@/components/map/FireMap";
-import FireOverlay from "@/components/map/FireOverlay";
 import { MapInteractionHUD } from "@/components/map/MapInteractionHUD";
 import type { MapInteractionMode } from "@/components/map/MapInteractionLayer";
 import { MapOverlayPanels, type MapStyleId } from "@/components/map/MapOverlayPanels";
@@ -62,6 +61,8 @@ const INITIAL_TERRAIN: TerrainOverlayState = {
 const DEFAULT_SIMULATION_TIMESTEPS = 12000;
 const MAX_SIMULATION_TIMESTEPS = 100000;
 const TIMESTEPS_PER_HOUR = 500;
+const DEFAULT_IGNITION_SPEED_MPS = 3;
+const DEFAULT_STATIC_SPACING_CELLS = 5;
 
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -139,13 +140,13 @@ export function ProjectWorkspace({
   const [lastSimulationSnapshot, setLastSimulationSnapshot] =
     useState<LastSimulationSnapshot | null>(null);
   const [replayFrame, setReplayFrame] = useState<FireOverlayPoint[] | null>(null);
-  const [isReplayAnimating, setIsReplayAnimating] = useState(false);
+  const [replayState, setReplayState] = useState<"idle" | "playing" | "paused">("idle");
+  const [replayCursor, setReplayCursor] = useState<number | null>(null);
   const [simulationRun, setSimulationRun] = useState<{
     status: "idle" | "running" | "ready" | "error";
     error: string | null;
     weatherSource?: string;
   }>({ status: "idle", error: null });
-  const replayTimersRef = useRef<number[]>([]);
   const [drawnShapes, setDrawnShapes] = useState<PolygonFeature[]>([]);
   const [mapStyle, setMapStyle] = useState<MapStyleId>("terrain");
 
@@ -165,7 +166,6 @@ export function ProjectWorkspace({
     lng: number;
     boundaryGeoJSON: BoundaryGeoJSON;
   } | null>(null);
-  const [weatherStatus, setWeatherStatus] = useState<string | null>(null);
 
   const [projectTitle, setProjectTitle] = useState(`Untitled project - ${randomSuffix()}`);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
@@ -189,7 +189,7 @@ export function ProjectWorkspace({
     "fuel-break" | "location" | "ignition"
   >("ignition");
   const [interactionHint, setInteractionHint] = useState<string | null>(null);
-  const pendingActionRef = useRef<"location" | "fuel-break" | null>(null);
+  const pendingActionRef = useRef<"location" | "fuel-break" | "line-ignition" | null>(null);
   const pendingPolygonRef = useRef<import("leaflet").LatLng[]>([]);
   const interactionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMapPositionNavKeyRef = useRef<string | null>(null);
@@ -217,68 +217,93 @@ export function ProjectWorkspace({
     setAgentChatSnapshot((p) => (p ? { ...p, introDone: true } : p));
   }, []);
 
-  const clearReplayTimers = useCallback(() => {
-    replayTimersRef.current.forEach(clearTimeout);
-    replayTimersRef.current = [];
+  const replayFrameRef = useRef<number | null>(null);
+  const replayLastTsRef = useRef<number | null>(null);
+
+  const stopReplayAnimation = useCallback(() => {
+    if (replayFrameRef.current !== null) {
+      cancelAnimationFrame(replayFrameRef.current);
+      replayFrameRef.current = null;
+    }
+    replayLastTsRef.current = null;
   }, []);
 
-  const runReplayAnimation = useCallback(
-    (points: FireOverlayPoint[]) => {
-      clearReplayTimers();
-      if (points.length === 0) {
-        setIsReplayAnimating(false);
-        setReplayFrame(null);
-        return;
+  const replayMaxTime = useMemo(() => {
+    const points = lastSimulationSnapshot?.overlay ?? [];
+    return points.reduce((max, p) => Math.max(max, p.time), 0);
+  }, [lastSimulationSnapshot]);
+
+  useEffect(() => {
+    if (replayState !== "playing") {
+      stopReplayAnimation();
+      return;
+    }
+    const maxTime = replayMaxTime;
+    if (maxTime <= 0) {
+      setReplayFrame(lastSimulationSnapshot?.overlay ?? null);
+      setReplayCursor(maxTime);
+      setReplayState("idle");
+      return;
+    }
+
+    const tick = (ts: number) => {
+      if (replayLastTsRef.current === null) {
+        replayLastTsRef.current = ts;
       }
-      const times = [...new Set(points.map((p) => p.time))].sort((a, b) => a - b);
-      if (times.length <= 1) {
-        setIsReplayAnimating(true);
-        setReplayFrame(points);
-        const id = window.setTimeout(() => {
-          setIsReplayAnimating(false);
-          setReplayFrame(null);
-        }, 420);
-        replayTimersRef.current.push(id);
-        return;
-      }
-      setIsReplayAnimating(true);
-      times.forEach((t, i) => {
-        const id = window.setTimeout(() => {
-          setReplayFrame(points.filter((p) => p.time <= t));
-          if (i === times.length - 1) {
-            setIsReplayAnimating(false);
-            setReplayFrame(null);
-          }
-        }, (i * 72) / playbackRate);
-        replayTimersRef.current.push(id);
+      const dt = ts - replayLastTsRef.current;
+      replayLastTsRef.current = ts;
+      setReplayCursor((prev) => {
+        const base = prev ?? 0;
+        const next = base + (dt / 1000) * playbackRate;
+        if (next >= maxTime) {
+          setReplayState("idle");
+          return maxTime;
+        }
+        return next;
       });
-    },
-    [clearReplayTimers, playbackRate],
-  );
+      replayFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    replayFrameRef.current = requestAnimationFrame(tick);
+    return () => {
+      stopReplayAnimation();
+    };
+  }, [replayState, replayMaxTime, playbackRate, lastSimulationSnapshot, stopReplayAnimation]);
 
   useEffect(() => {
     return () => {
-      clearReplayTimers();
+      stopReplayAnimation();
     };
-  }, [clearReplayTimers]);
+  }, [stopReplayAnimation]);
 
   const effectiveOverlay = useMemo<FireOverlayPoint[]>(() => {
-    if (isReplayAnimating && replayFrame) return replayFrame;
-    return lastSimulationSnapshot?.overlay ?? [];
-  }, [isReplayAnimating, replayFrame, lastSimulationSnapshot]);
+    if (replayState !== "idle" && replayFrame) return replayFrame;
+    // Keep simulation output ephemeral on the map; snapshots remain available for replay.
+    return [];
+  }, [replayState, replayFrame]);
 
   const effectivePerimeter = useMemo(() => {
-    if (isReplayAnimating) return null;
-    return lastSimulationSnapshot?.perimeterGeoJSON ?? null;
-  }, [isReplayAnimating, lastSimulationSnapshot]);
+    if (replayState !== "idle") return null;
+    return null;
+  }, [replayState]);
+
+  useEffect(() => {
+    if (!lastSimulationSnapshot || replayState === "idle") {
+      setReplayFrame(null);
+      return;
+    }
+    const cursor = replayCursor ?? 0;
+    setReplayFrame(lastSimulationSnapshot.overlay.filter((p) => p.time <= cursor));
+  }, [lastSimulationSnapshot, replayCursor, replayState]);
 
   const handleStartSimulation = useCallback(
     async (simulationTimesteps: number) => {
       if (simulationRun.status === "running") return;
       const requestedTimesteps = clampSimulationTimesteps(simulationTimesteps);
-      clearReplayTimers();
+      stopReplayAnimation();
       setReplayFrame(null);
-      setIsReplayAnimating(false);
+      setReplayState("idle");
+      setReplayCursor(null);
       setLastSimulationSnapshot(null); // Reset stats modal immediately
       if (readyBadgeTimerRef.current) {
         clearTimeout(readyBadgeTimerRef.current);
@@ -356,7 +381,8 @@ export function ProjectWorkspace({
           );
           readyBadgeTimerRef.current = null;
         }, 5000);
-        runReplayAnimation(overlay);
+        setReplayState("idle");
+        setReplayCursor(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setSimulationRun({ status: "error", error: msg });
@@ -367,15 +393,26 @@ export function ProjectWorkspace({
       weather,
       weatherOverrides,
       simulationRun.status,
-      clearReplayTimers,
-      runReplayAnimation,
+      stopReplayAnimation,
     ],
   );
 
   const handleReplay = useCallback(() => {
     if (!lastSimulationSnapshot) return;
-    runReplayAnimation(lastSimulationSnapshot.overlay);
-  }, [lastSimulationSnapshot, runReplayAnimation]);
+    setReplayCursor(0);
+    setReplayFrame([]);
+    setReplayState("playing");
+  }, [lastSimulationSnapshot]);
+
+  const handlePauseReplay = useCallback(() => {
+    if (replayState !== "playing") return;
+    setReplayState("paused");
+  }, [replayState]);
+
+  const handleResumeReplay = useCallback(() => {
+    if (replayState !== "paused") return;
+    setReplayState("playing");
+  }, [replayState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -654,9 +691,6 @@ export function ProjectWorkspace({
       const json = await res.json();
       if (res.ok && json.weather) {
         setWeather(mergeWeather(json.weather, weatherOverridesRef.current));
-        if (json.placeLabel) {
-          setWeatherStatus(`Weather for ${json.placeLabel} fetched`);
-        }
       }
     } catch (e) {
       console.error("Auto weather fetch failed", e);
@@ -684,9 +718,10 @@ export function ProjectWorkspace({
       // Clear terrain, simulation results, and replay state
       setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
       setLastSimulationSnapshot(null);
-      clearReplayTimers();
+      stopReplayAnimation();
       setReplayFrame(null);
-      setIsReplayAnimating(false);
+      setReplayState("idle");
+      setReplayCursor(null);
       setSimulationRun({ status: "idle", error: null });
       
       // Automatic weather fetch for the new project center
@@ -694,7 +729,7 @@ export function ProjectWorkspace({
     } else {
       setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     }
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers, fetchWeatherForCoords]);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, fetchWeatherForCoords]);
 
   const handleSegmentEdit = useCallback((edit: SegmentEdit) => {
     setProjectConfig((prev) => applySegmentEdit(prev, edit));
@@ -748,9 +783,10 @@ export function ProjectWorkspace({
 
   const resetProject = useCallback(() => {
     const nextIntroDone = agentChatSnapshot?.introDone ?? false;
-    clearReplayTimers();
+    stopReplayAnimation();
     setReplayFrame(null);
-    setIsReplayAnimating(false);
+    setReplayState("idle");
+    setReplayCursor(null);
     const nextTitle = `Untitled project - ${randomSuffix()}`;
     skipSaveAfterLoadRef.current = false;
     setProjectTitle(nextTitle);
@@ -807,7 +843,7 @@ export function ProjectWorkspace({
         setSaveStatus("error");
       }
     })();
-  }, [projectId, clearReplayTimers, agentChatSnapshot]);
+  }, [projectId, stopReplayAnimation, agentChatSnapshot]);
 
   useEffect(() => {
     if (!mapInteractionMode) setInteractionHint(null);
@@ -878,7 +914,7 @@ export function ProjectWorkspace({
     const gy = Math.round(dy / cellRes + maxDim / 2);
     const payload: ActionPayload = {
       action: "point-ignition",
-      points: [{ x: gx, y: gy, speed: 0.6, mode: "point_static" }],
+      points: [{ x: gx, y: gy, speed: DEFAULT_IGNITION_SPEED_MPS, mode: "point_static" }],
     };
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
     setMapInteractionMode(null);
@@ -921,8 +957,9 @@ export function ProjectWorkspace({
             start_y: s.y,
             end_x: e.x,
             end_y: e.y,
-            speed: 0.6,
+            speed: DEFAULT_IGNITION_SPEED_MPS,
             mode: "continuous_static",
+            distance: DEFAULT_STATIC_SPACING_CELLS,
           };
     pendingActionRef.current = null;
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
@@ -969,15 +1006,17 @@ export function ProjectWorkspace({
       setLocationSearchPreview(null);
       setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
       setLastSimulationSnapshot(null);
-      clearReplayTimers();
+      stopReplayAnimation();
       setReplayFrame(null);
-      setIsReplayAnimating(false);
+      setReplayState("idle");
+      setReplayCursor(null);
       setSimulationRun({ status: "idle", error: null });
     }
     setMapInteractionMode(null);
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers, pushInteractionHint]);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, pushInteractionHint]);
 
   const handlePolyline = useCallback((nodes: import("leaflet").LatLng[]) => {
+    const action = pendingActionRef.current;
     pendingActionRef.current = null;
     if (nodes.length < 2) { setMapInteractionMode(null); return; }
     const b = projectConfig.boundaryGeoJSON;
@@ -1007,14 +1046,28 @@ export function ProjectWorkspace({
     for (let i = 0; i < nodes.length - 1; i++) {
       const s = toGrid(nodes[i]!);
       const e = toGrid(nodes[i + 1]!);
-      const payload: ActionPayload = {
-        action: "fuel-break",
-        x1: s.x,
-        y1: s.y,
-        x2: e.x,
-        y2: e.y,
-      };
-      setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+      if (action === "line-ignition") {
+        const payload: ActionPayload = {
+          action: "line-ignition",
+          start_x: s.x,
+          start_y: s.y,
+          end_x: e.x,
+          end_y: e.y,
+          speed: DEFAULT_IGNITION_SPEED_MPS,
+          mode: "continuous_static",
+          distance: DEFAULT_STATIC_SPACING_CELLS,
+        };
+        setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+      } else {
+        const payload: ActionPayload = {
+          action: "fuel-break",
+          x1: s.x,
+          y1: s.y,
+          x2: e.x,
+          y2: e.y,
+        };
+        setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+      }
     }
     setMapInteractionMode(null);
   }, [projectConfig, pushInteractionHint]);
@@ -1048,15 +1101,16 @@ export function ProjectWorkspace({
     setLocationSearchPreview(null);
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
     setLastSimulationSnapshot(null);
-    clearReplayTimers();
+    stopReplayAnimation();
     setReplayFrame(null);
-    setIsReplayAnimating(false);
+    setReplayState("idle");
+    setReplayCursor(null);
     setSimulationRun({ status: "idle", error: null });
     setMapInteractionMode(null);
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, clearReplayTimers]);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation]);
 
   const handleRequestMapInteraction = useCallback(
-    (mode: MapInteractionMode, action?: "location" | "fuel-break") => {
+    (mode: MapInteractionMode, action?: "location" | "fuel-break" | "line-ignition") => {
       pendingActionRef.current = action ?? null;
       if (action === "fuel-break") setInteractionPalette("fuel-break");
       else if (action === "location") setInteractionPalette("location");
@@ -1078,6 +1132,8 @@ export function ProjectWorkspace({
         );
       } else if (mode === "polyline" && action === "fuel-break") {
         setInteractionHint("Click nodes for the fuel-break path, then press Escape to finish.");
+      } else if (mode === "polyline" && action === "line-ignition") {
+        setInteractionHint("Click nodes for the ignition path, then press Escape to finish.");
       } else if (mode === "line" && action === "fuel-break") {
         setInteractionHint("Click start point, then end point to place a fuel-break segment.");
       }
@@ -1201,11 +1257,6 @@ export function ProjectWorkspace({
             {saveStatus === "saved" && "Saved"}
             {saveStatus === "error" && "Save failed"}
           </span>
-          {weatherStatus && (
-            <span className="shrink-0 hidden md:inline text-[9px] text-orange-400/80 sm:text-[10px]">
-              • {weatherStatus}
-            </span>
-          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
@@ -1241,21 +1292,42 @@ export function ProjectWorkspace({
           )}
           <button
             type="button"
-            title="Play saved simulation"
+            title={
+              replayState === "paused"
+                  ? "Resume replay"
+                  : "Play saved simulation"
+            }
             disabled={
               !lastSimulationSnapshot ||
-              isReplayAnimating ||
               simulationRun.status === "running"
             }
             onClick={() => {
               if (lastSimulationSnapshot) {
-                runReplayAnimation(lastSimulationSnapshot.overlay);
+                if (replayState === "paused") {
+                  handleResumeReplay();
+                } else {
+                  handleReplay();
+                }
               }
             }}
             className="flex h-6 items-center gap-1 rounded-md border border-white/10 px-1.5 text-[9px] font-medium text-white/70 transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 sm:h-7 sm:gap-1.5 sm:px-2 sm:text-[11px]"
           >
             <Play className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-            <span className="hidden sm:inline">Play simulation</span>
+            <span className="hidden sm:inline">
+              {replayState === "paused"
+                  ? "Resume simulation"
+                  : "Play simulation"}
+            </span>
+          </button>
+          <button
+            type="button"
+            title="Pause replay"
+            disabled={replayState !== "playing" || simulationRun.status === "running"}
+            onClick={handlePauseReplay}
+            className="flex h-6 items-center gap-1 rounded-md border border-white/10 px-1.5 text-[9px] font-medium text-white/70 transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 sm:h-7 sm:gap-1.5 sm:px-2 sm:text-[11px]"
+          >
+            <Pause className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+            <span className="hidden sm:inline">Pause</span>
           </button>
           <Link
             href="/dashboard"
@@ -1311,9 +1383,6 @@ export function ProjectWorkspace({
           squareWidthM={projectConfig.cellSpaceDimension * projectConfig.cellResolution}
           squareHeightM={projectConfig.cellSpaceDimensionLat * projectConfig.cellResolution}
         />
-
-        <FireOverlay points={effectiveOverlay} />
-
         <MapOverlayPanels
           stats={panelStats}
           messages={messages}
@@ -1328,7 +1397,6 @@ export function ProjectWorkspace({
           onStartSimulation={(timesteps) => {
             void handleStartSimulation(timesteps);
           }}
-          onReplay={handleReplay}
           onCommitPlanGridField={(field, value) => {
             setProjectConfig((prev) => ({ ...prev, [field]: value }));
           }}
@@ -1354,9 +1422,6 @@ export function ProjectWorkspace({
           }}
           onWeatherFetchedAtCoords={(next, coords, label) => {
             setWeather(mergeWeather(next, weatherOverridesRef.current));
-            if (label) {
-              setWeatherStatus(`Weather for ${label} fetched`);
-            }
           }}
           onActionConfirm={handleActionConfirm}
           onLocationSearchPreview={setLocationSearchPreview}

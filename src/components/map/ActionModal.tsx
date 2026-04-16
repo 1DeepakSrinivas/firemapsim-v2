@@ -1062,7 +1062,7 @@ function defaultManualValues(actionId: ActionId): Record<string, string> {
   const fields = ACTION_MODAL_CONFIGS[actionId].fields;
   for (const f of fields) {
     if (f.key === "speed" && (actionId === "point-ignition" || actionId === "line-ignition")) {
-      base[f.key] = "0.6";
+      base[f.key] = "3";
     } else if (f.key === "mode" && actionId === "point-ignition") {
       base[f.key] = "point_static";
     } else if (f.key === "mode" && actionId === "line-ignition") {
