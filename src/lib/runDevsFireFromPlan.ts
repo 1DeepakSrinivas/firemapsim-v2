@@ -17,6 +17,8 @@ export type RunDevsFireResult = {
   weatherSource: "dynamic";
 };
 
+const SUPPRESSED_CELL_BATCH_SIZE = 50;
+
 export function meteoToDevsFireWindDirection(meteoDirection: number): number {
   return (meteoDirection + 180) % 360;
 }
@@ -201,11 +203,10 @@ export async function executeDevsFireSimulation(
     windDirection: devsFireWindDirection,
   });
 
-  const suppressedChunkSize = 50;
   for (const sup of plan.sup_infos) {
     const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
-    for (let i = 0; i < points.length; i += suppressedChunkSize) {
-      const chunk = points.slice(i, i + suppressedChunkSize);
+    for (let i = 0; i < points.length; i += SUPPRESSED_CELL_BATCH_SIZE) {
+      const chunk = points.slice(i, i + SUPPRESSED_CELL_BATCH_SIZE);
       await Promise.all(
         chunk.map((point) =>
           devsFirePost("/setSuppressedCell/", userToken, {
