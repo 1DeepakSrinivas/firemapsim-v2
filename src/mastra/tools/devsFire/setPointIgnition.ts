@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -15,7 +15,7 @@ export const setPointIgnition = createTool({
   inputSchema,
   execute: async ({ userToken, xs, ys }) => {
     try {
-      return await devsFireProxyPost("/setPointIgnition/", userToken, {
+      return await devsFirePost("/setPointIgnition/", userToken, {
         xs,
         ys,
       });

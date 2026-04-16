@@ -1,11 +1,11 @@
 /**
  * Browser-side DEVS-FIRE calls via `/api/devs-fire` proxy.
- * Sequence mirrors `runDevsFireFromPlan`: connect → setMultiParameters → setCellSpaceLocation →
+ * Sequence mirrors `runDevsFireFromPlan`: connect → setCellResolution → setCellSpaceLocation →
  * setWindCondition, then getCellFuel / getCellSlope / getCellAspect.
  * GSU docs: “If using the online fuel data, then the location must be picked” via
  * `setCellSpaceLocation` before terrain matrices are valid.
  *
- * @see https://sims.cs.gsu.edu/sims/research/API_usage.html
+ * @see devs-fire-docs/api-usage.html
  */
 
 import type { IgnitionPlan } from "@/types/ignitionPlan";
@@ -34,14 +34,34 @@ async function postDevsFireProxy(payload: ProxyPayload): Promise<unknown> {
 }
 
 export function parseUserToken(data: unknown): string {
+  const isHtmlLikeToken = (value: string): boolean => {
+    const trimmed = value.trimStart().toLowerCase();
+    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+  };
+
   if (typeof data === "string") {
     const t = data.trim();
-    if (t) return t;
+    if (t) {
+      if (isHtmlLikeToken(t)) {
+        throw new Error(
+          "DEVS-FIRE returned HTML instead of a token. Check backend DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
+        );
+      }
+      return t;
+    }
   }
   if (data && typeof data === "object") {
     const o = data as Record<string, unknown>;
     const token = o.token ?? o.userToken;
-    if (typeof token === "string" && token.trim()) return token.trim();
+    if (typeof token === "string" && token.trim()) {
+      const trimmed = token.trim();
+      if (isHtmlLikeToken(trimmed)) {
+        throw new Error(
+          "DEVS-FIRE returned HTML instead of a token. Check backend DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
+        );
+      }
+      return trimmed;
+    }
   }
   throw new Error("DEVS-FIRE response did not include a user token");
 }
@@ -81,21 +101,15 @@ export function effectiveDevsFireLatLng(plan: IgnitionPlan): { lat: number; lng:
 }
 
 /** Aligns the server-side grid with the current project + weather (required before terrain matrices are meaningful). */
-export async function setDevsFireMultiParameters(
+export async function setDevsFireCellResolution(
   token: string,
   plan: IgnitionPlan,
-  weather: WeatherValues,
 ): Promise<void> {
-  const { lat, lng } = effectiveDevsFireLatLng(plan);
   const cellDimension = Math.max(plan.cellSpaceDimension, plan.cellSpaceDimensionLat);
   await postDevsFireProxy({
-    path: "/setMultiParameters/",
+    path: "/setCellResolution/",
     token,
     params: {
-      lat,
-      lng,
-      windSpeed: weather.windSpeed,
-      windDirection: weather.windDirection,
       cellResolution: plan.cellResolution,
       cellDimension,
     },
@@ -129,7 +143,7 @@ export async function bootstrapTerrainSession(
   }
 
   const token = await connectDevsFire();
-  await setDevsFireMultiParameters(token, plan, weather);
+  await setDevsFireCellResolution(token, plan);
 
   await postDevsFireProxy({
     path: "/setCellSpaceLocation/",

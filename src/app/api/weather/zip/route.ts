@@ -27,6 +27,40 @@ function assertWithinUsMapExtent(lat: number, lng: number): void {
   }
 }
 
+async function reverseGeocodeAddress(lat: number, lng: number): Promise<string> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "json");
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { "User-Agent": "FireMapSim-v2/1.0" },
+    cache: "no-store",
+  });
+
+  if (!response.ok) return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+  const data = (await response.json()) as {
+    display_name?: string;
+    address?: {
+      county?: string;
+      state?: string;
+      city?: string;
+      town?: string;
+      village?: string;
+    };
+  };
+
+  const addr = data.address;
+  if (addr) {
+    const parts = [addr.city || addr.town || addr.village || addr.county, addr.state].filter(Boolean);
+    if (parts.length > 0) return parts.join(", ");
+  }
+
+  return data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+}
+
 async function geocodeUsAddress(query: string): Promise<{
   lat: number;
   lng: number;
@@ -99,7 +133,7 @@ export async function GET(request: NextRequest) {
     ) {
       lat = parsed.data.lat;
       lng = parsed.data.lng;
-      label = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      label = await reverseGeocodeAddress(lat, lng);
     } else {
       const query = parsed.data.q ?? parsed.data.zip;
       if (!query) {

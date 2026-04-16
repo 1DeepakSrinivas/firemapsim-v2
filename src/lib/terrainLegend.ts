@@ -30,6 +30,14 @@ export function fuelColorForCell(v: number): string {
   return "rgba(239,68,68,0.45)";
 }
 
+export function fuelLabelForCell(v: number): string {
+  if (v <= 0) return "Empty";
+  if (v <= 3) return "Grass";
+  if (v <= 7) return "Shrub";
+  if (v <= 13) return "Timber";
+  return "Heavy";
+}
+
 export function slopeColorForCell(v: number): string {
   if (v <= 0) return "transparent";
   const t = Math.min(v / 60, 1);

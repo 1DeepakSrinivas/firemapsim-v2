@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
 import {
-  devsFireProxyPost,
+  devsFirePost,
   parseNumericResponse,
   toErrorMessage,
 } from "./_client";
@@ -20,7 +20,7 @@ export const getBurningCellNum = createTool({
   outputSchema,
   execute: async ({ userToken }) => {
     try {
-      const data = await devsFireProxyPost("/getBurningCellNum/", userToken);
+      const data = await devsFirePost("/getBurningCellNum/", userToken);
       return parseNumericResponse(data, "/getBurningCellNum/");
     } catch (error) {
       throw new Error(`getBurningCellNum failed: ${toErrorMessage(error)}`);
