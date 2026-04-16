@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, X } from "lucide-react";
+import { ChevronDown, Send } from "lucide-react";
 import type { UIMessage } from "ai";
+import { AnimatePresence, motion } from "motion/react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,9 +147,12 @@ export function CedarCaptionChat({
   if (!open) {
     return (
       <div className="pointer-events-auto">
-        <button
+        <motion.button
           type="button"
           onClick={() => setOpen(true)}
+          initial={{ opacity: 0, y: 6, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
           className="flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-[11px] font-medium text-white/70 shadow-2xl backdrop-blur transition hover:bg-[#222]/95 hover:text-white sm:gap-2.5 sm:px-4 sm:py-2 sm:text-xs"
         >
           <span
@@ -161,15 +165,21 @@ export function CedarCaptionChat({
             }
           />
           FireMapSim Agent Chat
-        </button>
+        </motion.button>
       </div>
     );
   }
 
   return (
-    <section
-      className={`pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1a]/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
-    >
+    <AnimatePresence initial={false} mode="wait">
+      <motion.section
+        key="chat-open"
+        initial={{ opacity: 0, y: 10, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.985 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        className={`pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1a]/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
+      >
       {/* Title bar */}
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2 sm:px-4 sm:py-2.5">
         <div className="flex items-center gap-2">
@@ -195,7 +205,7 @@ export function CedarCaptionChat({
             onClick={() => setOpen(false)}
             className="text-white/30 transition hover:text-white/70"
           >
-            <X className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
           </button>
         </div>
       </div>
@@ -310,6 +320,7 @@ export function CedarCaptionChat({
           </button>
         </div>
       </form>
-    </section>
+      </motion.section>
+    </AnimatePresence>
   );
 }
