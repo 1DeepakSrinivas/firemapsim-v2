@@ -113,6 +113,7 @@ function segmentLine(
   end_y: number,
   speed: number,
   mode: string,
+  distance: number | null = null,
 ): SegmentDetail {
   return {
     type: "segment",
@@ -122,7 +123,7 @@ function segmentLine(
     end_y,
     speed,
     mode,
-    distance: null,
+    distance,
   };
 }
 
@@ -278,6 +279,7 @@ export type ActionPayload =
       end_y: number;
       speed?: number;
       mode?: string;
+      distance?: number | null;
     }
   | {
       action: "fuel-break";
@@ -318,7 +320,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
       };
     }
     case "point-ignition": {
-      const speed = 0.6;
+      const speed = 3;
       const mode = "point_static";
       const newDetails = payload.points.map((p) =>
         segmentPoint(p.x, p.y, p.speed ?? speed, p.mode ?? mode),
@@ -336,8 +338,9 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
       return { ...plan, team_infos: nextTeams };
     }
     case "line-ignition": {
-      const speed = payload.speed ?? 0.6;
+      const speed = payload.speed ?? 3;
       const mode = payload.mode ?? "continuous_static";
+      const distance = payload.distance ?? (mode === "continuous_static" ? 5 : null);
       const seg = segmentLine(
         payload.start_x,
         payload.start_y,
@@ -345,6 +348,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
         payload.end_y,
         speed,
         mode,
+        distance,
       );
       const team0 = plan.team_infos[0] ?? {
         team_name: "team0",

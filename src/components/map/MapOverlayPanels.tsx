@@ -386,19 +386,15 @@ function RunConfigPanel({
   onResetProject,
   runActionsEnabled,
   simulationRunning,
-  hasResults,
-  onReplay,
   playbackRate = 1,
   onPlaybackRateChange,
 }: {
   onStartSimulation?: (simulationTimesteps: number) => void;
   onAskAgent?: () => void;
-  onReplay?: () => void;
   onResetProject?: () => void;
   /** Boundary set and at least one ignition (required to run or reset from this panel) */
   runActionsEnabled: boolean;
   simulationRunning?: boolean;
-  hasResults?: boolean;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
 }) {
@@ -444,27 +440,27 @@ function RunConfigPanel({
           </div>
           <input
             type="range"
-            min={0.25}
-            max={4}
+            min={1}
+            max={10}
             step={0.25}
             value={playbackRate}
             onChange={(e) => onPlaybackRateChange?.(Number(e.target.value))}
             className="w-full accent-orange-400"
           />
           <div className="flex justify-between text-[8px] text-white/20 sm:text-[9px]">
-            <span>0.25×</span>
             <span>1×</span>
             <span>2×</span>
-            <span>4×</span>
+            <span>5×</span>
+            <span>10×</span>
           </div>
         </div>
 
         {/* Actions */}
         <div className="space-y-1 pt-0.5 sm:space-y-1.5">
           <ActionBtn
-            onClick={() => (hasResults ? onReplay?.() : onStartSimulation?.(timesteps))}
-            label={hasResults ? "Replay Simulation" : "Start Simulation"}
-            icon={hasResults ? RotateCcw : Play}
+            onClick={() => onStartSimulation?.(timesteps)}
+            label="Start Simulation"
+            icon={Play}
             variant="primary"
             disabled={!runActionsEnabled || simulationRunning}
             title={
@@ -580,7 +576,6 @@ function ScenarioPanel({
   mapRef,
   hasProjectLocation,
   hasSimulationResults = false,
-  onReplay,
 }: {
   weather: WeatherValues;
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
@@ -588,7 +583,10 @@ function ScenarioPanel({
   onWeatherFetched?: (next: WeatherValues) => void;
   onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }, label?: string) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
-  onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
+  onRequestMapInteraction?: (
+    mode: MapInteractionMode,
+    action?: "location" | "fuel-break" | "line-ignition",
+  ) => void;
   onLocationSearchPreview?: (
     preview: {
       lat: number;
@@ -606,7 +604,6 @@ function ScenarioPanel({
   hasProjectLocation: boolean;
   /** True after a simulation has been run and results received. Location becomes locked. */
   hasSimulationResults?: boolean;
-  onReplay?: () => void;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
 }) {
@@ -635,6 +632,8 @@ function ScenarioPanel({
       if (!hasProjectLocation) return;
       if (id === "point-ignition") {
         onRequestMapInteraction?.("pin");
+      } else if (id === "line-ignition") {
+        onRequestMapInteraction?.("polyline", "line-ignition");
       } else {
         onRequestMapInteraction?.("line");
       }
@@ -1826,7 +1825,10 @@ type MapOverlayPanelsProps = {
     label?: string,
   ) => void;
   onActionConfirm?: (payload: ActionPayload) => void;
-  onRequestMapInteraction?: (mode: MapInteractionMode, action?: "location" | "fuel-break") => void;
+  onRequestMapInteraction?: (
+    mode: MapInteractionMode,
+    action?: "location" | "fuel-break" | "line-ignition",
+  ) => void;
   onLocationSearchPreview?: (
     preview: {
       lat: number;
@@ -1861,7 +1863,6 @@ type MapOverlayPanelsProps = {
   /** True after a simulation has been run and results received */
   hasSimulationResults?: boolean;
   simulationRunning?: boolean;
-  onReplay?: () => void;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
 };
@@ -1894,7 +1895,6 @@ export function MapOverlayPanels({
   onCommitPlanGridField,
   hasSimulationResults = false,
   simulationRunning = false,
-  onReplay,
   playbackRate = 1,
   onPlaybackRateChange,
 }: MapOverlayPanelsProps) {
@@ -1916,15 +1916,12 @@ export function MapOverlayPanels({
           mapRef={mapRef}
           hasProjectLocation={hasProjectLocation}
           hasSimulationResults={hasSimulationResults}
-          onReplay={onReplay}
           playbackRate={playbackRate}
           onPlaybackRateChange={onPlaybackRateChange}
         />
         <div className="flex flex-col gap-1.5 sm:gap-2">
           <RunConfigPanel
             onStartSimulation={onStartSimulation}
-            onReplay={onReplay}
-            hasResults={hasSimulationResults}
             onAskAgent={onAskAgent}
             onResetProject={onResetProject}
             runActionsEnabled={runActionsEnabled}
