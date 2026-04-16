@@ -8,8 +8,44 @@ export {
   simulationOperationSchema,
 } from "./simulationOperations";
 
-export const DEVS_FIRE_BASE_URL =
-  process.env.DEVS_FIRE_BASE_URL ?? "http://firesim.cs.gsu.edu:8084/api";
+const DEVS_FIRE_CANONICAL_BASE_URL = "https://firesim.cs.gsu.edu/api";
+const DEVS_FIRE_HOSTNAME = "firesim.cs.gsu.edu";
+
+function normalizedPathname(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, "");
+  return trimmed || "/";
+}
+
+function normalizeDevsFireBaseUrl(value: string | undefined): string {
+  const candidate = value?.trim();
+  if (!candidate) {
+    return DEVS_FIRE_CANONICAL_BASE_URL;
+  }
+
+  const withoutTrailingSlash = candidate.replace(/\/+$/, "");
+
+  try {
+    const parsed = new URL(withoutTrailingSlash);
+    if (parsed.hostname === DEVS_FIRE_HOSTNAME) {
+      const path = normalizedPathname(parsed.pathname);
+      const isDeprecatedLegacyBase = parsed.port === "8084" && path === "/api";
+      const isRootHost = path === "/";
+      const isApiHost = path === "/api";
+
+      if (isDeprecatedLegacyBase || isRootHost || isApiHost) {
+        return DEVS_FIRE_CANONICAL_BASE_URL;
+      }
+    }
+  } catch {
+    // Keep non-URL values unchanged for explicit runtime visibility.
+  }
+
+  return withoutTrailingSlash;
+}
+
+export const DEVS_FIRE_BASE_URL = normalizeDevsFireBaseUrl(
+  process.env.DEVS_FIRE_BASE_URL,
+);
 export const DEVS_FIRE_PROXY_PATH = "/api/devs-fire";
 
 function parseTimeoutMs(value: string | undefined, fallback: number): number {
@@ -67,6 +103,16 @@ function toBodyAndHeaders(
   return { body: JSON.stringify(body), headers };
 }
 
+function looksLikeHtmlDocument(text: string): boolean {
+  const trimmed = text.trimStart().toLowerCase();
+  return (
+    trimmed.startsWith("<!doctype html") ||
+    trimmed.startsWith("<html") ||
+    trimmed.startsWith("<head") ||
+    trimmed.startsWith("<body")
+  );
+}
+
 function parseDevsFireResponse(text: string, endpoint: string): unknown {
   if (!text) {
     return null;
@@ -75,6 +121,11 @@ function parseDevsFireResponse(text: string, endpoint: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
+    if (looksLikeHtmlDocument(text)) {
+      throw new Error(
+        `DEVS-FIRE returned HTML for ${endpoint}. Verify DEVS_FIRE_BASE_URL is an API host (expected ${DEVS_FIRE_CANONICAL_BASE_URL}).`,
+      );
+    }
     return text;
   }
 }
@@ -172,6 +223,11 @@ export function getDevsFireProxyUrl(): string {
   return `${appUrl}${DEVS_FIRE_PROXY_PATH}`;
 }
 
+/**
+ * Browser-oriented proxy: POSTs to this app's `/api/devs-fire`.
+ * Server-side code (Mastra tools, workflows, `executeDevsFireSimulation`) should use
+ * {@link devsFirePost} directly to avoid relying on `NEXT_PUBLIC_APP_URL` self-fetch.
+ */
 export async function devsFireProxyPost(
   path: string,
   token?: string,
@@ -257,6 +313,7 @@ export async function devsFirePost(
       method: "POST",
       headers: requestParts.headers,
       body: requestParts.body,
+      redirect: "manual",
       cache: "no-store",
       signal: controller.signal,
     });
@@ -270,6 +327,13 @@ export async function devsFirePost(
   } finally {
     clearTimeout(timeoutId);
     removeAbortListener?.();
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get("location");
+    throw new Error(
+      `DEVS-FIRE redirected ${url.pathname} (${response.status})${location ? ` to ${location}` : ""}. Verify DEVS_FIRE_BASE_URL is ${DEVS_FIRE_CANONICAL_BASE_URL}.`,
+    );
   }
 
   const responseText = await response.text();

@@ -262,7 +262,7 @@ const runStep = createStep({
     userToken: z.string(),
     operations: simulationOperationListSchema,
     bbox: bboxSchema,
-    weatherSource: z.enum(["open-meteo", "nws", "scenario"]),
+    weatherSource: z.enum(["open-meteo", "nws", "scenario", "dynamic"]),
   }),
   execute: async ({ inputData, getInitData, writer }) => {
     const branches = inputData as Record<string, unknown>;

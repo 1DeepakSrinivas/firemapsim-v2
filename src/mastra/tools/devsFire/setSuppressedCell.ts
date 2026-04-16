@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFireProxyPost, toErrorMessage } from "./_client";
+import { devsFirePost, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({
   userToken: z.string().min(1),
@@ -17,7 +17,7 @@ export const setSuppressedCell = createTool({
   inputSchema,
   execute: async ({ userToken, x1, y1, x2, y2 }) => {
     try {
-      return await devsFireProxyPost("/setSuppressedCell/", userToken, {
+      return await devsFirePost("/setSuppressedCell/", userToken, {
         x1,
         y1,
         x2,
