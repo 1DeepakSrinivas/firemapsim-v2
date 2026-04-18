@@ -5,7 +5,7 @@ import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Flame, Home, Pause, Play } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   CedarCaptionChat,
@@ -14,9 +14,14 @@ import {
 } from "@/chatComponents/CedarCaptionChat";
 import { ProjectAgentChatHost } from "@/components/map/ProjectAgentChatHost";
 import FireMap from "@/components/map/FireMap";
+import { type ActionId } from "@/components/map/ActionModal";
 import { MapInteractionHUD } from "@/components/map/MapInteractionHUD";
 import type { MapInteractionMode } from "@/components/map/MapInteractionLayer";
 import { MapOverlayPanels, type MapStyleId } from "@/components/map/MapOverlayPanels";
+import { WorkspaceSidebar } from "@/components/map/WorkspaceSidebar";
+import { WorkspaceModalHost } from "@/components/map/WorkspaceModalHost";
+import { Button } from "@/components/ui/button";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import type {
   BoundsChangePayload,
   FireOverlayPoint,
@@ -169,11 +174,10 @@ export function ProjectWorkspace({
 
   const [projectTitle, setProjectTitle] = useState(`Untitled project - ${randomSuffix()}`);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [titleEditing, setTitleEditing] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [simulationTimesteps, setSimulationTimesteps] = useState(12000);
   const [projectMissing, setProjectMissing] = useState(false);
-  const [titleDraft, setTitleDraft] = useState(projectTitle);
 
   const skipSaveAfterLoadRef = useRef(true);
   const lastSavedPayloadRef = useRef<string | null>(null);
@@ -189,7 +193,7 @@ export function ProjectWorkspace({
     "fuel-break" | "location" | "ignition"
   >("ignition");
   const [interactionHint, setInteractionHint] = useState<string | null>(null);
-  const pendingActionRef = useRef<"location" | "fuel-break" | "line-ignition" | null>(null);
+  const pendingActionRef = useRef<"location" | "fuel-break" | "point-ignition" | "line-ignition" | null>(null);
   const pendingPolygonRef = useRef<import("leaflet").LatLng[]>([]);
   const interactionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMapPositionNavKeyRef = useRef<string | null>(null);
@@ -200,10 +204,37 @@ export function ProjectWorkspace({
     introDone: boolean;
   } | null>(null);
   const [chatMountKey, setChatMountKey] = useState(0);
+  const [isDesktopViewport, setIsDesktopViewport] = useState<boolean | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeWorkspaceAction, setActiveWorkspaceAction] = useState<ActionId | null>(null);
+  const [pendingReset, setPendingReset] = useState(false);
+  const [pendingRelocate, setPendingRelocate] = useState(false);
 
   useEffect(() => {
     weatherOverridesRef.current = weatherOverrides;
   }, [weatherOverrides]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1024px)");
+    const syncViewport = () => setIsDesktopViewport(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef) return;
+    const frame = window.requestAnimationFrame(() => {
+      mapRef.invalidateSize(false);
+    });
+    const settle = window.setTimeout(() => {
+      mapRef.invalidateSize(true);
+    }, 240);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
+    };
+  }, [mapRef, sidebarOpen]);
 
   const handleAgentChatPersist = useCallback((messages: UIMessage[], introDone: boolean) => {
     const deduped = dedupeMessagesById(messages);
@@ -607,17 +638,6 @@ export function ProjectWorkspace({
         ? "error"
         : "closed";
 
-  const isSimulating = simulationRun.status === "running";
-  const isSimulationReady = simulationRun.status === "ready";
-  const activeTerrainLayer =
-    terrainState.show.has("fuel")
-      ? "fuel"
-      : terrainState.show.has("slope")
-        ? "slope"
-        : terrainState.show.has("aspect")
-          ? "aspect"
-          : null;
-
   const panelStats = useMemo(
     () => ({
       ...statsFromOverlay(effectiveOverlay),
@@ -683,6 +703,37 @@ export function ProjectWorkspace({
     [handleStartSimulation],
   );
 
+  const handleRenameProject = useCallback(
+    async (nextTitleRaw: string) => {
+      const nextTitle = nextTitleRaw.trim();
+      if (!nextTitle) return false;
+      if (nextTitle === projectTitle) return true;
+
+      const previousTitle = projectTitle;
+      setProjectTitle(nextTitle);
+      setSaveStatus("saving");
+      try {
+        const res = await fetch(`/api/project/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: nextTitle }),
+        });
+        if (!res.ok) {
+          throw new Error("Failed to rename project");
+        }
+        setSaveStatus("saved");
+        if (savedClearRef.current) clearTimeout(savedClearRef.current);
+        savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
+        return true;
+      } catch {
+        setProjectTitle(previousTitle);
+        setSaveStatus("error");
+        return false;
+      }
+    },
+    [projectId, projectTitle],
+  );
+
   const fetchWeatherForCoords = useCallback(async (lat: number, lng: number) => {
     try {
       const res = await fetch(`/api/weather/zip?lat=${lat}&lng=${lng}`, {
@@ -696,6 +747,56 @@ export function ProjectWorkspace({
       console.error("Auto weather fetch failed", e);
     }
   }, []);
+
+  const promptPopulateWeatherForPlacedBoundary = useCallback(
+    async (lat: number, lng: number) => {
+      try {
+        const res = await fetch(`/api/weather/zip?lat=${lat}&lng=${lng}`, {
+          cache: "no-store",
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          weather?: WeatherValues;
+          placeLabel?: string;
+          county?: string;
+          state?: string;
+          error?: string;
+        };
+
+        if (!res.ok || !json.weather) {
+          throw new Error(json.error ?? "Failed to fetch weather for selected boundary");
+        }
+
+        const countyState =
+          [json.county, json.state].filter(Boolean).join(", ") ||
+          json.placeLabel ||
+          `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+        toast("Populate weather automatically?", {
+          description: countyState,
+          action: {
+            label: "Yes, populate weather",
+            onClick: () => {
+              setWeather(mergeWeather(json.weather as WeatherValues, {}));
+              setWeatherOverrides({});
+              toast.success(
+                json.placeLabel
+                  ? `${json.placeLabel} · current conditions loaded`
+                  : "Current conditions loaded",
+              );
+            },
+          },
+          cancel: {
+            label: "No",
+            onClick: () => {},
+          },
+          duration: 12000,
+        });
+      } catch {
+        toast.error("Could not fetch weather for this location");
+      }
+    },
+    [],
+  );
 
   const handleActionConfirm = useCallback((payload: ActionPayload) => {
     if (payload.action === "location") {
@@ -781,18 +882,24 @@ export function ProjectWorkspace({
     [],
   );
 
-  const resetProject = useCallback(() => {
+  const resetProject = useCallback(async () => {
     const nextIntroDone = agentChatSnapshot?.introDone ?? false;
+    const nextTitle = `Untitled project - ${randomSuffix()}`;
+    const plan = defaultIgnitionPlan();
+    plan.windSpeed = DEFAULT_WEATHER.windSpeed;
+    plan.windDegree = DEFAULT_WEATHER.windDirection;
+    plan.temperature = DEFAULT_WEATHER.temperature;
+    plan.humidity = DEFAULT_WEATHER.humidity;
+
+    // Reset local state immediately so the workspace visibly returns to defaults.
     stopReplayAnimation();
     setReplayFrame(null);
     setReplayState("idle");
     setReplayCursor(null);
-    const nextTitle = `Untitled project - ${randomSuffix()}`;
     skipSaveAfterLoadRef.current = false;
     setProjectTitle(nextTitle);
-    setTitleDraft(nextTitle);
     setInteractionHint(null);
-    setProjectConfig(defaultIgnitionPlan());
+    setProjectConfig(plan);
     setWeather({ ...DEFAULT_WEATHER });
     setWeatherOverrides({});
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
@@ -803,47 +910,39 @@ export function ProjectWorkspace({
     setMapInteractionMode(null);
     pendingActionRef.current = null;
     pendingPolygonRef.current = [];
-
     setChatMountKey((k) => k + 1);
     setAgentChatSnapshot({ messages: [], introDone: nextIntroDone });
 
     setSaveStatus("saving");
-    void (async () => {
-      try {
-        const plan = defaultIgnitionPlan();
-        plan.windSpeed = DEFAULT_WEATHER.windSpeed;
-        plan.windDegree = DEFAULT_WEATHER.windDirection;
-        plan.temperature = DEFAULT_WEATHER.temperature;
-        plan.humidity = DEFAULT_WEATHER.humidity;
-        const res = await fetch(`/api/project/${projectId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: nextTitle,
-            plan,
-            weather: DEFAULT_WEATHER,
-            lastSimulation: null,
-            agentChatMessages: [],
-            agentChatIntroDone: nextIntroDone,
-          }),
-        });
-        if (!res.ok) throw new Error("reset save failed");
-        lastSavedPayloadRef.current = JSON.stringify({
-          title: nextTitle,
-          plan,
-          weather: DEFAULT_WEATHER,
-          lastSimulation: null,
-          agentChatMessages: [],
-          agentChatIntroDone: nextIntroDone,
-        });
-        setSaveStatus("saved");
-        if (savedClearRef.current) clearTimeout(savedClearRef.current);
-        savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
-      } catch {
-        setSaveStatus("error");
-      }
-    })();
-  }, [projectId, stopReplayAnimation, agentChatSnapshot]);
+
+    const payload = {
+      title: nextTitle,
+      plan,
+      weather: DEFAULT_WEATHER,
+      lastSimulation: null,
+      agentChatMessages: [],
+      agentChatIntroDone: nextIntroDone,
+    };
+
+    const res = await fetch(`/api/project/${projectId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      credentials: "include",
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      setSaveStatus("error");
+      throw new Error(err.error ?? "Failed to reset project");
+    }
+
+    lastSavedPayloadRef.current = JSON.stringify(payload);
+    setSaveStatus("saved");
+    if (savedClearRef.current) clearTimeout(savedClearRef.current);
+    savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
+  }, [projectId, agentChatSnapshot, stopReplayAnimation]);
 
   useEffect(() => {
     if (!mapInteractionMode) setInteractionHint(null);
@@ -1011,9 +1110,10 @@ export function ProjectWorkspace({
       setReplayState("idle");
       setReplayCursor(null);
       setSimulationRun({ status: "idle", error: null });
+      void promptPopulateWeatherForPlacedBoundary(centerLat, centerLng);
     }
     setMapInteractionMode(null);
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, pushInteractionHint]);
+  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, pushInteractionHint, promptPopulateWeatherForPlacedBoundary]);
 
   const handlePolyline = useCallback((nodes: import("leaflet").LatLng[]) => {
     const action = pendingActionRef.current;
@@ -1110,7 +1210,7 @@ export function ProjectWorkspace({
   }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation]);
 
   const handleRequestMapInteraction = useCallback(
-    (mode: MapInteractionMode, action?: "location" | "fuel-break" | "line-ignition") => {
+    (mode: MapInteractionMode, action?: "location" | "fuel-break" | "point-ignition" | "line-ignition") => {
       pendingActionRef.current = action ?? null;
       if (action === "fuel-break") setInteractionPalette("fuel-break");
       else if (action === "location") setInteractionPalette("location");
@@ -1134,8 +1234,12 @@ export function ProjectWorkspace({
         setInteractionHint("Click nodes for the fuel-break path, then press Escape to finish.");
       } else if (mode === "polyline" && action === "line-ignition") {
         setInteractionHint("Click nodes for the ignition path, then press Escape to finish.");
+      } else if (mode === "line" && action === "line-ignition") {
+        setInteractionHint("Click start point, then end point to place a line ignition.");
       } else if (mode === "line" && action === "fuel-break") {
         setInteractionHint("Click start point, then end point to place a fuel-break segment.");
+      } else if (mode === "pin" && action === "point-ignition") {
+        setInteractionHint("Click on the map to place a point ignition source.");
       }
     },
     [locationSearchPreview, projectConfig.cellSpaceDimension, projectConfig.cellResolution],
@@ -1156,19 +1260,9 @@ export function ProjectWorkspace({
     weather.humidity,
   ]);
 
-  useEffect(() => {
-    if (!titleEditing) setTitleDraft(projectTitle);
-  }, [projectTitle, titleEditing]);
-
-  function commitTitle() {
-    const t = titleDraft.trim() || projectTitle;
-    setProjectTitle(t);
-    setTitleEditing(false);
-  }
-
   if (!hydrated) {
     return (
-      <main className="flex h-screen items-center justify-center bg-[#0f0f0f] text-sm text-white/40">
+      <main className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         Loading…
       </main>
     );
@@ -1176,11 +1270,11 @@ export function ProjectWorkspace({
 
   if (projectMissing) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-[#0f0f0f] px-4 text-center text-white">
-        <p className="text-sm text-white/60">Project not found or you do not have access.</p>
+      <main className="flex min-h-screen flex-col items-center justify-center bg-background px-4 text-center text-foreground">
+        <p className="text-sm text-muted-foreground">Project not found or you do not have access.</p>
         <Link
           href="/dashboard"
-          className="mt-4 text-sm font-medium text-orange-400 hover:text-orange-300"
+          className="mt-4 text-sm font-medium text-primary hover:opacity-85"
         >
           Back to projects
         </Link>
@@ -1190,8 +1284,32 @@ export function ProjectWorkspace({
 
   if (agentChatSnapshot === null) {
     return (
-      <main className="flex h-screen items-center justify-center bg-[#0f0f0f] text-sm text-white/40">
+      <main className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         Loading…
+      </main>
+    );
+  }
+
+  if (isDesktopViewport === null) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading…
+      </main>
+    );
+  }
+
+  if (!isDesktopViewport) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 text-center">
+          <p className="text-lg font-semibold tracking-tight">Desktop Required</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Please move to a PC to access this workspace.
+          </p>
+          <Button asChild className="mt-5">
+            <Link href="/dashboard">Back to projects</Link>
+          </Button>
+        </div>
       </main>
     );
   }
@@ -1214,191 +1332,82 @@ export function ProjectWorkspace({
         sendStarterPrompt,
         dismissStarterPrompt,
       }) => (
-    <main className="flex h-screen flex-col overflow-hidden bg-[#0f0f0f] text-white">
-      <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-[#141414] px-3 sm:h-12 sm:px-4">
-        <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-orange-500/20 sm:h-7 sm:w-7 sm:rounded-lg">
-            <Flame className="h-3.5 w-3.5 text-orange-400 sm:h-4 sm:w-4" />
-          </div>
-          <span className="text-[10px] font-bold tracking-widest text-white/80 uppercase sm:text-xs">
-            <span className="hidden sm:inline">FireMapSim-v2</span>
-            <span className="sm:hidden">FMS-v2</span>
-          </span>
-        </div>
-
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-1 sm:gap-3">
-          {titleEditing ? (
-            <input
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitTitle();
-                if (e.key === "Escape") {
-                  setTitleDraft(projectTitle);
-                  setTitleEditing(false);
-                }
-              }}
-              className="max-w-[min(100%,280px)] rounded border border-white/15 bg-white/8 px-2 py-1 text-center text-[11px] text-white outline-none focus:border-orange-400/50 sm:max-w-md sm:text-xs"
-              autoFocus
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setTitleEditing(true)}
-              className="truncate text-center text-[11px] font-medium text-white/85 hover:text-white sm:text-xs"
-              title="Rename project"
-            >
-              {projectTitle}
-            </button>
-          )}
-          <span className="shrink-0 text-[9px] text-white/35 sm:text-[10px]" aria-live="polite">
-            {saveStatus === "saving" && "Saving…"}
-            {saveStatus === "saved" && "Saved"}
-            {saveStatus === "error" && "Save failed"}
-          </span>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-          {terrainState.loading && (
-            <span className="flex items-center gap-1 rounded-full border border-sky-500/35 bg-sky-500/15 px-2 py-0.5 text-[9px] font-medium text-sky-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
-              <span className="h-1 w-1 animate-pulse rounded-full bg-sky-300 sm:h-1.5 sm:w-1.5" />
-              <span className="hidden sm:inline">
-                Fetching terrain{activeTerrainLayer ? ` (${activeTerrainLayer})` : ""}
-              </span>
-              <span className="sm:hidden">Terrain</span>
-            </span>
-          )}
-          {!terrainState.loading && activeTerrainLayer && terrainState.data[activeTerrainLayer] && (
-            <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
-              <span className="h-1 w-1 rounded-full bg-emerald-300 sm:h-1.5 sm:w-1.5" />
-              <span className="hidden sm:inline">Terrain ready ({activeTerrainLayer})</span>
-              <span className="sm:hidden">T ready</span>
-            </span>
-          )}
-          {isSimulating && (
-            <span className="flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/15 px-2 py-0.5 text-[9px] font-medium text-amber-300 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
-              <span className="h-1 w-1 animate-pulse rounded-full bg-amber-300 sm:h-1.5 sm:w-1.5" />
-              <span className="hidden sm:inline">Processing simulation</span>
-              <span className="sm:hidden">Processing</span>
-            </span>
-          )}
-          {isSimulationReady && (
-            <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-medium text-emerald-400 sm:gap-1.5 sm:px-2.5 sm:py-1 sm:text-[11px]">
-              <span className="h-1 w-1 rounded-full bg-emerald-400 sm:h-1.5 sm:w-1.5" />
-              <span className="hidden sm:inline">Simulation Ready</span>
-              <span className="sm:hidden">Ready</span>
-            </span>
-          )}
-          <button
-            type="button"
-            title={
-              replayState === "paused"
-                  ? "Resume replay"
-                  : "Play saved simulation"
-            }
-            disabled={
-              !lastSimulationSnapshot ||
-              simulationRun.status === "running"
-            }
-            onClick={() => {
-              if (lastSimulationSnapshot) {
-                if (replayState === "paused") {
-                  handleResumeReplay();
-                } else {
-                  handleReplay();
-                }
-              }
-            }}
-            className="flex h-6 items-center gap-1 rounded-md border border-white/10 px-1.5 text-[9px] font-medium text-white/70 transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 sm:h-7 sm:gap-1.5 sm:px-2 sm:text-[11px]"
-          >
-            <Play className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-            <span className="hidden sm:inline">
-              {replayState === "paused"
-                  ? "Resume simulation"
-                  : "Play simulation"}
-            </span>
-          </button>
-          <button
-            type="button"
-            title="Pause replay"
-            disabled={replayState !== "playing" || simulationRun.status === "running"}
-            onClick={handlePauseReplay}
-            className="flex h-6 items-center gap-1 rounded-md border border-white/10 px-1.5 text-[9px] font-medium text-white/70 transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 sm:h-7 sm:gap-1.5 sm:px-2 sm:text-[11px]"
-          >
-            <Pause className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-            <span className="hidden sm:inline">Pause</span>
-          </button>
-          <Link
-            href="/dashboard"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-white/40 hover:bg-white/5 hover:text-white/70 sm:h-7 sm:w-7"
-            title="Projects"
-          >
-            <Home className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-          </Link>
-        </div>
-      </header>
-
-      <div className="relative min-h-0 flex-1">
-        <FireMap
-          onMapReady={handleMapReady}
-          onBoundsChange={handleBoundsChange}
-          fireOverlay={effectiveOverlay}
-          perimeterGeoJSON={effectivePerimeter}
-          mapStyle={mapStyle}
-          interactionMode={mapInteractionMode}
-          onPin={handlePin}
-          onLine={handleLine}
-          onPolyline={handlePolyline}
-          onPolygon={handlePolygon}
-          onRect={handleRect}
-          validateLatLng={validateInteractionLatLng}
-          onValidationFail={pushInteractionHint}
-          boundaryGeoJSON={projectConfig.boundaryGeoJSON}
-          locationSearchPreview={locationSearchPreview}
-          terrainData={terrainState.data}
-          terrainShow={terrainState.show}
-          showCellInfo={terrainState.showCellInfo}
-          cellResolution={
-            lastSimulationSnapshot?.gridMeta?.cellResolution ?? projectConfig.cellResolution
-          }
-          cellSpaceDimension={
-            lastSimulationSnapshot?.gridMeta?.cellSpaceDimension ??
-            projectConfig.cellSpaceDimension
-          }
-          cellSpaceDimensionLat={
-            lastSimulationSnapshot?.gridMeta?.cellSpaceDimensionLat ??
-            projectConfig.cellSpaceDimensionLat
-          }
-          projCenterLat={
-            lastSimulationSnapshot?.gridMeta?.projCenterLat ??
-            projectConfig.proj_center_lat
-          }
-          projCenterLng={
-            lastSimulationSnapshot?.gridMeta?.projCenterLng ??
-            projectConfig.proj_center_lng
-          }
-          scenarioPlan={projectConfig}
-          interactionPalette={interactionPalette}
-          squareWidthM={projectConfig.cellSpaceDimension * projectConfig.cellResolution}
-          squareHeightM={projectConfig.cellSpaceDimensionLat * projectConfig.cellResolution}
+    <WorkspaceModalHost
+      activeWorkspaceAction={activeWorkspaceAction}
+      onCloseActionModal={() => {
+        if (activeWorkspaceAction === "location") {
+          setLocationSearchPreview(null);
+        }
+        setActiveWorkspaceAction(null);
+      }}
+      onConfirmAction={(payload) => {
+        handleActionConfirm(payload);
+        setActiveWorkspaceAction(null);
+      }}
+      onRequestMapDraw={(mode) => {
+        const action =
+          activeWorkspaceAction === "fuel-break" ? "fuel-break" : "location";
+        setActiveWorkspaceAction(null);
+        setLocationSearchPreview(null);
+        handleRequestMapInteraction(mode, action);
+      }}
+      mapRef={mapRef}
+      onLocationSearchPreview={setLocationSearchPreview}
+      currentPlan={projectConfig}
+      pendingRelocate={pendingRelocate}
+      onRelocateConfirm={() => {
+        setPendingRelocate(false);
+        setActiveWorkspaceAction("location");
+      }}
+      onRelocateCancel={() => setPendingRelocate(false)}
+      pendingReset={pendingReset}
+      onResetConfirm={resetProject}
+      onResetCancel={() => setPendingReset(false)}
+    >
+    <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      className="h-screen min-h-0 w-full flex-col overflow-hidden bg-background text-foreground"
+    >
+    <main className="relative flex h-full overflow-hidden bg-background text-foreground">
+      <div
+        className="pointer-events-none absolute top-3 z-40 transition-[left] duration-200 ease-linear"
+        style={{
+          left: sidebarOpen
+            ? "calc(var(--sidebar-width) + 0.5rem)"
+            : "calc(var(--sidebar-width-icon) + 0.5rem)",
+        }}
+      >
+        <SidebarTrigger
+          className="pointer-events-auto h-6 w-6 rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground sm:h-7 sm:w-7"
+          title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
         />
-        <MapOverlayPanels
-          stats={panelStats}
-          messages={messages}
-          planPreview={{
-            segments: totalSegmentCount,
-            fuelBreaks: projectConfig.sup_num,
-            centerSet: hasProjectLocation,
-          }}
-          hasProjectLocation={hasProjectLocation}
-          hasSimulationResults={!!lastSimulationSnapshot}
-          runActionsEnabled={runActionsEnabled}
-          onStartSimulation={(timesteps) => {
-            void handleStartSimulation(timesteps);
-          }}
+      </div>
+      <div className="min-h-0 flex flex-1">
+        <WorkspaceSidebar
+          projectTitle={projectTitle}
+          onRenameProject={handleRenameProject}
+          projectConfig={projectConfig}
+          weather={weather}
           onCommitPlanGridField={(field, value) => {
             setProjectConfig((prev) => ({ ...prev, [field]: value }));
+          }}
+          onWeatherOverride={(field, value) => {
+            setWeather((prev) => ({ ...prev, [field]: value }));
+            setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+          }}
+          onWeatherFetched={(next) => {
+            setWeather(mergeWeather(next, weatherOverridesRef.current));
+          }}
+          onWeatherFetchedAtCoords={(next, coords, label) => {
+            setWeather(mergeWeather(next, weatherOverridesRef.current));
+          }}
+          onOpenActionModal={setActiveWorkspaceAction}
+          onRequestMapInteraction={handleRequestMapInteraction}
+          simulationTimesteps={simulationTimesteps}
+          onSimulationTimestepsChange={setSimulationTimesteps}
+          onStartSimulation={(timesteps) => {
+            void handleStartSimulation(timesteps);
           }}
           onAskAgent={async () => {
             const latest = [...messages].reverse().find((m) => m.role === "assistant");
@@ -1409,61 +1418,148 @@ export function ProjectWorkspace({
                 : "Run simulation for current map area.",
             });
           }}
-          onResetProject={resetProject}
-          weather={weather}
-          onWeatherOverride={(field, value) => {
-            setWeather((prev) => ({ ...prev, [field]: value }));
-            setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
-          }}
-          onWeatherFetched={(next) => {
-            setWeather(mergeWeather(next, weatherOverridesRef.current));
-            // Setting a generic status if we don't have the place label here
-            // Note: MapOverlayPanels will provide more specific hints locally
-          }}
-          onWeatherFetchedAtCoords={(next, coords, label) => {
-            setWeather(mergeWeather(next, weatherOverridesRef.current));
-          }}
-          onActionConfirm={handleActionConfirm}
-          onLocationSearchPreview={setLocationSearchPreview}
-          onRequestMapInteraction={handleRequestMapInteraction}
-          mapStyle={mapStyle}
-          onMapStyleChange={setMapStyle}
-          mapRef={mapRef}
-          projectConfig={projectConfig}
+          onResetRequest={() => setPendingReset(true)}
+          onRelocateRequest={() => setPendingRelocate(true)}
           onSegmentEdit={handleSegmentEdit}
           onSegmentDelete={handleSegmentDelete}
           onPointIgnitionEdit={handlePointIgnitionEdit}
           onFuelBreakDelete={handleFuelBreakDelete}
-          terrainState={terrainState}
-          onTerrainChange={handleTerrainChange}
+          runActionsEnabled={runActionsEnabled}
           simulationRunning={simulationRun.status === "running"}
+          hasProjectLocation={hasProjectLocation}
+          hasSimulationResults={!!lastSimulationSnapshot}
+          planPreview={{
+            segments: totalSegmentCount,
+            fuelBreaks: projectConfig.sup_num,
+            centerSet: hasProjectLocation,
+          }}
           playbackRate={playbackRate}
           onPlaybackRateChange={setPlaybackRate}
         />
 
-        <MapInteractionHUD
-          mode={mapInteractionMode}
-          hint={interactionHint}
-          onCancel={() => setMapInteractionMode(null)}
-        />
-
-        <div className="pointer-events-none absolute inset-x-0 bottom-2 z-500 flex justify-center px-2 sm:bottom-4 sm:px-4">
-          <CedarCaptionChat
-            showThinking={true}
-            userName={user?.firstName ?? user?.username ?? undefined}
-            messages={messages}
-            status={status}
-            sendMessage={sendMessage}
-            onSetupUpdate={handleSetupUpdate}
-            onRunTrigger={handleRunTrigger}
-            showStarterPrompt={showStarterPrompt}
-            starterPromptText={starterPromptText}
-            onSendStarterPrompt={sendStarterPrompt}
-            onDismissStarterPrompt={dismissStarterPrompt}
+        <SidebarInset className="min-h-0 bg-background">
+        <div className="relative min-h-0 flex-1">
+          <FireMap
+            onMapReady={handleMapReady}
+            onBoundsChange={handleBoundsChange}
+            fireOverlay={effectiveOverlay}
+            perimeterGeoJSON={effectivePerimeter}
+            mapStyle={mapStyle}
+            interactionMode={mapInteractionMode}
+            onPin={handlePin}
+            onLine={handleLine}
+            onPolyline={handlePolyline}
+            onPolygon={handlePolygon}
+            onRect={handleRect}
+            validateLatLng={validateInteractionLatLng}
+            onValidationFail={pushInteractionHint}
+            boundaryGeoJSON={projectConfig.boundaryGeoJSON}
+            locationSearchPreview={locationSearchPreview}
+            terrainData={terrainState.data}
+            terrainShow={terrainState.show}
+            showCellInfo={terrainState.showCellInfo}
+            cellResolution={
+              lastSimulationSnapshot?.gridMeta?.cellResolution ?? projectConfig.cellResolution
+            }
+            cellSpaceDimension={
+              lastSimulationSnapshot?.gridMeta?.cellSpaceDimension ??
+              projectConfig.cellSpaceDimension
+            }
+            cellSpaceDimensionLat={
+              lastSimulationSnapshot?.gridMeta?.cellSpaceDimensionLat ??
+              projectConfig.cellSpaceDimensionLat
+            }
+            projCenterLat={
+              lastSimulationSnapshot?.gridMeta?.projCenterLat ??
+              projectConfig.proj_center_lat
+            }
+            projCenterLng={
+              lastSimulationSnapshot?.gridMeta?.projCenterLng ??
+              projectConfig.proj_center_lng
+            }
+            scenarioPlan={projectConfig}
+            interactionPalette={interactionPalette}
+            squareWidthM={projectConfig.cellSpaceDimension * projectConfig.cellResolution}
+            squareHeightM={projectConfig.cellSpaceDimensionLat * projectConfig.cellResolution}
           />
+
+          <MapOverlayPanels
+            layout="map-utilities"
+            stats={panelStats}
+            weather={weather}
+            mapStyle={mapStyle}
+            onMapStyleChange={setMapStyle}
+            mapRef={mapRef}
+            projectConfig={projectConfig}
+            terrainState={terrainState}
+            onTerrainChange={handleTerrainChange}
+            onWeatherOverride={(field, value) => {
+              setWeather((prev) => ({ ...prev, [field]: value }));
+              setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+            }}
+          />
+
+          <MapInteractionHUD
+            mode={mapInteractionMode}
+            hint={interactionHint}
+            onCancel={() => setMapInteractionMode(null)}
+          />
+
+          <div className="pointer-events-none absolute inset-x-0 bottom-2 z-500 flex justify-center px-2 sm:bottom-4 sm:px-4">
+            <CedarCaptionChat
+              showThinking={true}
+              userName={user?.firstName ?? user?.username ?? undefined}
+              messages={messages}
+              status={status}
+              sendMessage={sendMessage}
+              onSetupUpdate={handleSetupUpdate}
+              onRunTrigger={handleRunTrigger}
+              showStarterPrompt={showStarterPrompt}
+              starterPromptText={starterPromptText}
+              onSendStarterPrompt={sendStarterPrompt}
+              onDismissStarterPrompt={dismissStarterPrompt}
+            />
+          </div>
         </div>
+        </SidebarInset>
       </div>
+      <MapOverlayPanels
+        layout="run-config-overlay"
+        stats={panelStats}
+        weather={weather}
+        mapStyle={mapStyle}
+        onMapStyleChange={setMapStyle}
+        mapRef={mapRef}
+        projectConfig={projectConfig}
+        runActionsEnabled={runActionsEnabled}
+        onStartSimulation={(timesteps) => {
+          void handleStartSimulation(timesteps);
+        }}
+        onResetRequest={() => setPendingReset(true)}
+        simulationRunning={simulationRun.status === "running"}
+        simulationTimesteps={simulationTimesteps}
+        onSimulationTimestepsChange={setSimulationTimesteps}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={setPlaybackRate}
+        replayState={replayState}
+        canReplay={Boolean(lastSimulationSnapshot)}
+        onReplayPlay={() => {
+          if (!lastSimulationSnapshot) return;
+          if (replayState === "paused") {
+            handleResumeReplay();
+          } else {
+            handleReplay();
+          }
+        }}
+        onReplayPause={handlePauseReplay}
+        onWeatherOverride={(field, value) => {
+          setWeather((prev) => ({ ...prev, [field]: value }));
+          setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+        }}
+      />
     </main>
+    </SidebarProvider>
+    </WorkspaceModalHost>
       )}
     </ProjectAgentChatHost>
   );

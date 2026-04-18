@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Send } from "lucide-react";
 import type { UIMessage } from "ai";
 import { AnimatePresence, motion } from "motion/react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -153,7 +155,7 @@ export function CedarCaptionChat({
           initial={{ opacity: 0, y: 6, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
-          className="flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-[11px] font-medium text-white/70 shadow-2xl backdrop-blur transition hover:bg-[#222]/95 hover:text-white sm:gap-2.5 sm:px-4 sm:py-2 sm:text-xs"
+          className="themed-layer flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-[11px] font-medium text-white/70 shadow-2xl backdrop-blur transition hover:bg-[#222]/95 hover:text-white sm:gap-2.5 sm:px-4 sm:py-2 sm:text-xs"
         >
           <span
             className={
@@ -178,7 +180,7 @@ export function CedarCaptionChat({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 8, scale: 0.985 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className={`pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1a]/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
+        className={`themed-layer pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1a]/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
       >
       {/* Title bar */}
       <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2 sm:px-4 sm:py-2.5">
@@ -200,13 +202,14 @@ export function CedarCaptionChat({
           {isBusy && (
             <span className="hidden text-[10px] text-white/35 sm:inline">Streaming</span>
           )}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => setOpen(false)}
-            className="text-white/30 transition hover:text-white/70"
+            className="text-white/30 hover:text-white/70"
           >
             <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -230,8 +233,9 @@ export function CedarCaptionChat({
               {starterPromptText}
             </p>
             <div className="mt-2 flex items-center gap-1.5 sm:gap-2">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={starterBusy || isBusy}
                 onClick={async () => {
                   if (!onSendStarterPrompt) return;
@@ -242,12 +246,13 @@ export function CedarCaptionChat({
                     setStarterBusy(false);
                   }
                 }}
-                className="rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40 sm:text-[11px]"
+                className="h-auto rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-blue-500 sm:text-[11px]"
               >
                 Send
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={starterBusy || isBusy}
                 onClick={async () => {
                   if (!onDismissStarterPrompt) return;
@@ -258,10 +263,10 @@ export function CedarCaptionChat({
                     setStarterBusy(false);
                   }
                 }}
-                className="rounded-md border border-white/15 px-2.5 py-1 text-[10px] font-medium text-white/70 transition hover:bg-white/8 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 sm:text-[11px]"
+                className="h-auto rounded-md border-white/15 bg-transparent px-2.5 py-1 text-[10px] font-medium text-white/70 hover:bg-white/8 hover:text-white sm:text-[11px]"
               >
                 Dismiss
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -304,20 +309,19 @@ export function CedarCaptionChat({
         }}
       >
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <input
+          <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Reply to the agent…"
             disabled={isBusy}
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/30 outline-none transition focus:border-white/20 focus:bg-white/8 disabled:opacity-50 sm:px-3 sm:py-2 sm:text-xs"
+            className="h-auto flex-1 rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/30 focus-visible:ring-white/20 sm:px-3 sm:py-2 sm:text-xs"
           />
-          <button
-            type="submit"
+          <Button
             disabled={isBusy || !input.trim()}
-            className="shrink-0 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:py-2 sm:text-xs"
+            className="h-auto shrink-0 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-blue-500 sm:px-3 sm:py-2 sm:text-xs"
           >
             Send
-          </button>
+          </Button>
         </div>
       </form>
       </motion.section>

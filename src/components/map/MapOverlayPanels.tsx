@@ -3,7 +3,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
-  Bot,
   ChevronRight,
   Crosshair,
   Database,
@@ -12,6 +11,7 @@ import {
   Loader2,
   MapPin,
   Minus,
+  Pause,
   Play,
   RotateCcw,
   Shield,
@@ -20,7 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { UIMessage } from "ai";
+import { toast } from "sonner";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 
 import {
@@ -37,7 +37,6 @@ import {
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 import type {
   ActionPayload,
-  BoundaryGeoJSON,
   IgnitionMode,
   IgnitionPlan,
   SegmentEdit,
@@ -49,9 +48,17 @@ import {
 } from "@/types/ignitionPlan";
 import type { MapInteractionMode } from "./MapInteractionLayer";
 
-import { ActionModal, type ActionId, MAP_INTERACTION_ACTIONS } from "./ActionModal";
+import { type ActionId, MAP_INTERACTION_ACTIONS } from "./ActionModal";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,24 +89,24 @@ function TerrainAccordionSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-t border-white/6 first:border-t-0">
-      <button
-        type="button"
+    <div className="border-t border-border/70 first:border-t-0">
+      <Button
+        variant="ghost"
         onClick={onToggle}
         className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors sm:px-3 sm:py-2.5",
-          open ? "text-white" : "text-white/50 hover:text-white/80",
+          "h-auto w-full justify-start gap-2 px-2.5 py-2 text-left transition-colors sm:px-3 sm:py-2.5",
+          open ? "text-foreground" : "text-muted-foreground hover:text-foreground",
         )}
       >
         <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         <span className="flex-1 text-[10px] font-semibold tracking-wide sm:text-[11px]">{label}</span>
         <ChevronRight
           className={cn(
-            "h-2.5 w-2.5 shrink-0 text-white/25 transition-transform duration-200 sm:h-3 sm:w-3",
+            "h-2.5 w-2.5 shrink-0 text-muted-foreground transition-transform duration-200 sm:h-3 sm:w-3",
             open && "rotate-90",
           )}
         />
-      </button>
+      </Button>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -123,7 +130,7 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
   return (
     <div
       className={cn(
-        "pointer-events-auto rounded-xl border border-white/10 bg-[#141414]/95 backdrop-blur-sm",
+        "themed-layer pointer-events-auto rounded-xl border border-stroke-secondary/30 bg-card/95 text-card-foreground backdrop-blur-sm",
         className,
       )}
     >
@@ -134,7 +141,7 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-white/25 sm:mb-2 sm:text-[10px]">
+    <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground sm:mb-2 sm:text-[10px]">
       {children}
     </p>
   );
@@ -156,23 +163,23 @@ function ActionBtn({
   title?: string;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={disabled}
       title={title}
       className={cn(
-        "flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2 sm:px-2.5 sm:text-[11px]",
+        "h-auto w-full justify-start gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2 sm:px-2.5 sm:text-[11px]",
         variant === "primary"
-          ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30"
+          ? "bg-primary/15 text-primary hover:bg-primary/20"
           : variant === "danger"
             ? "border border-red-500/25 bg-red-500/10 text-red-400/90 hover:bg-red-500/20"
-            : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90",
+            : "bg-muted text-muted-foreground hover:bg-muted/75 hover:text-foreground",
       )}
     >
       <Icon className="h-2.5 w-2.5 shrink-0 sm:h-3 sm:w-3" />
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -193,23 +200,23 @@ function AccordionSection({
 }) {
   return (
     <div className="border-t border-white/6 first:border-t-0">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => onToggle(id)}
         className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-2 text-left transition-colors sm:px-3 sm:py-2.5",
-          open ? "text-white" : "text-white/50 hover:text-white/80",
+          "h-auto w-full justify-start gap-2 px-2.5 py-2 text-left transition-colors sm:px-3 sm:py-2.5",
+          open ? "text-foreground" : "text-muted-foreground hover:text-foreground",
         )}
       >
         <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         <span className="flex-1 text-[10px] font-semibold tracking-wide sm:text-[11px]">{label}</span>
         <ChevronRight
           className={cn(
-            "h-2.5 w-2.5 shrink-0 text-white/25 transition-transform duration-200 sm:h-3 sm:w-3",
+            "h-2.5 w-2.5 shrink-0 text-muted-foreground transition-transform duration-200 sm:h-3 sm:w-3",
             open && "rotate-90",
           )}
         />
-      </button>
+      </Button>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -263,7 +270,7 @@ function InlineEdit({
     <div className="flex items-center justify-between py-1 sm:py-1.5">
       <span className="text-[10px] text-white/40 sm:text-[11px]">{label}</span>
       {editing ? (
-        <input
+        <Input
           ref={ref}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -272,17 +279,18 @@ function InlineEdit({
             if (e.key === "Enter") commit();
             if (e.key === "Escape") { setDraft(String(value)); setEditing(false); }
           }}
-          className="w-16 rounded border border-white/15 bg-white/8 px-1.5 py-0.5 text-right text-[10px] text-white outline-none focus:border-orange-400/50 sm:w-20 sm:px-2 sm:text-[11px]"
+          className="h-auto w-16 border-white/15 bg-white/8 px-1.5 py-0.5 text-right text-[10px] text-white focus-visible:ring-orange-400/50 sm:w-20 sm:px-2 sm:text-[11px]"
         />
       ) : (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => { setDraft(String(value)); setEditing(true); }}
-          className="group flex items-center gap-1 text-[10px] text-white/70 hover:text-white sm:text-[11px]"
+          className="group h-auto gap-1 px-0 text-[10px] text-white/70 hover:bg-transparent hover:text-white sm:text-[11px]"
         >
           {value}{suffix ? ` ${suffix}` : ""}
           <span className="text-[8px] text-white/20 group-hover:text-white/40 sm:text-[9px]">✎</span>
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -382,24 +390,33 @@ function ProgressPanel({
 
 function RunConfigPanel({
   onStartSimulation,
-  onAskAgent,
-  onResetProject,
+  onResetRequest,
   runActionsEnabled,
   simulationRunning,
+  simulationTimesteps = 12000,
+  onSimulationTimestepsChange,
   playbackRate = 1,
   onPlaybackRateChange,
+  replayState = "idle",
+  canReplay = false,
+  onReplayPlay,
+  onReplayPause,
 }: {
   onStartSimulation?: (simulationTimesteps: number) => void;
-  onAskAgent?: () => void;
-  onResetProject?: () => void;
+  /** Emits upward — modal host owns the confirm dialog */
+  onResetRequest?: () => void;
   /** Boundary set and at least one ignition (required to run or reset from this panel) */
   runActionsEnabled: boolean;
   simulationRunning?: boolean;
+  simulationTimesteps?: number;
+  onSimulationTimestepsChange?: (value: number) => void;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
+  replayState?: "idle" | "playing" | "paused";
+  canReplay?: boolean;
+  onReplayPlay?: () => void;
+  onReplayPause?: () => void;
 }) {
-  const [timesteps, setTimesteps] = useState(12000);
-  const [resetOpen, setResetOpen] = useState(false);
 
   return (
     <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
@@ -414,21 +431,23 @@ function RunConfigPanel({
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-white/40 sm:text-[11px]">Timesteps</span>
           <div className="flex items-center gap-1 sm:gap-1.5">
-            <button
-              type="button"
-              onClick={() => setTimesteps((t) => Math.max(1000, t - 1000))}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => onSimulationTimestepsChange?.(Math.max(1000, simulationTimesteps - 1000))}
+              className="size-5 shrink-0 border-white/10 p-0 text-white/50 hover:border-white/20 hover:text-white/80"
             >
               <Minus className="h-2.5 w-2.5" />
-            </button>
-            <span className="w-10 text-center text-[10px] font-semibold text-white/80 sm:w-12 sm:text-[11px]">{timesteps}</span>
-            <button
-              type="button"
-              onClick={() => setTimesteps((t) => Math.min(100_000, t + 1000))}
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 text-[11px] text-white/50 hover:border-white/20 hover:text-white/80"
+            </Button>
+            <span className="w-10 text-center text-[10px] font-semibold text-white/80 sm:w-12 sm:text-[11px]">{simulationTimesteps}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => onSimulationTimestepsChange?.(Math.min(100_000, simulationTimesteps + 1000))}
+              className="size-5 shrink-0 border-white/10 p-0 text-[11px] text-white/50 hover:border-white/20 hover:text-white/80"
             >
               +
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -438,14 +457,14 @@ function RunConfigPanel({
             <span className="text-[10px] text-white/40 sm:text-[11px]">Playback rate</span>
             <span className="text-[10px] font-semibold text-white/70 sm:text-[11px]">{playbackRate}×</span>
           </div>
-          <input
+          <Input
             type="range"
             min={1}
             max={10}
             step={0.25}
             value={playbackRate}
             onChange={(e) => onPlaybackRateChange?.(Number(e.target.value))}
-            className="w-full accent-orange-400"
+            className="h-auto w-full border-0 bg-transparent px-0 py-0 accent-orange-400"
           />
           <div className="flex justify-between text-[8px] text-white/20 sm:text-[9px]">
             <span>1×</span>
@@ -455,10 +474,52 @@ function RunConfigPanel({
           </div>
         </div>
 
+        <div className="space-y-1 sm:space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-white/40 sm:text-[11px]">Replay</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onReplayPlay}
+              aria-label="Play"
+              title="Play"
+              disabled={!canReplay || simulationRunning}
+              className="size-7 border-white/10 p-0 text-white/70 hover:border-white/20 hover:text-white disabled:opacity-40"
+            >
+              <Play className="h-3.5 w-3.5" />
+              <span className="sr-only">Play</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onReplayPause}
+              aria-label="Pause"
+              title="Pause"
+              disabled={replayState !== "playing" || simulationRunning}
+              className="size-7 border-white/10 p-0 text-white/70 hover:border-white/20 hover:text-white disabled:opacity-40"
+            >
+              <Pause className="h-3.5 w-3.5" />
+              <span className="sr-only">Pause</span>
+            </Button>
+          </div>
+          {!canReplay && (
+            <p className="text-[9px] text-white/35">
+              Run a simulation first to enable replay.
+            </p>
+          )}
+          {canReplay && simulationRunning && (
+            <p className="text-[9px] text-white/35">
+              Replay controls are disabled while simulation is processing.
+            </p>
+          )}
+        </div>
+
         {/* Actions */}
         <div className="space-y-1 pt-0.5 sm:space-y-1.5">
           <ActionBtn
-            onClick={() => onStartSimulation?.(timesteps)}
+            onClick={() => onStartSimulation?.(simulationTimesteps)}
             label="Start Simulation"
             icon={Play}
             variant="primary"
@@ -471,59 +532,13 @@ function RunConfigPanel({
                   : undefined
             }
           />
-          <ActionBtn
-            onClick={onAskAgent}
-            label="Ask Agent To Run"
-            icon={Bot}
-            disabled={!runActionsEnabled || simulationRunning}
-            title={
-              !runActionsEnabled
-                ? "Set the project area and at least one point or line ignition first"
-                : simulationRunning
-                  ? "Simulation is already processing"
-                  : undefined
-            }
-          />
-          {onResetProject && (
-            <>
-              <ActionBtn
-                onClick={() => setResetOpen(true)}
-                label="Reset project"
-                icon={RotateCcw}
-                variant="danger"
-              />
-              <Dialog open={resetOpen} onOpenChange={setResetOpen}>
-                <DialogContent className="max-w-sm border-white/10 bg-[#141414] text-white shadow-xl">
-                  <DialogTitle className="text-sm font-semibold tracking-tight text-white/90">
-                    Reset project?
-                  </DialogTitle>
-                  <DialogDescription className="text-[11px] leading-relaxed text-white/55">
-                    Clears the project location and boundary, ignition lines, fuel breaks, weather values, terrain
-                    overlay selections, and stops the current simulation. This cannot be undone.
-                  </DialogDescription>
-                  <div className="flex justify-end gap-2 pt-1">
-                    <DialogClose asChild>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:bg-white/10"
-                      >
-                        Cancel
-                      </button>
-                    </DialogClose>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onResetProject();
-                        setResetOpen(false);
-                      }}
-                      className="rounded-lg bg-red-500/90 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-red-600"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </>
+          {onResetRequest && (
+            <ActionBtn
+              onClick={onResetRequest}
+              label="Reset project"
+              icon={RotateCcw}
+              variant="danger"
+            />
           )}
         </div>
       </div>
@@ -567,13 +582,12 @@ function ScenarioPanel({
   onWeatherOverride,
   onWeatherFetched,
   onWeatherFetchedAtCoords,
-  onActionConfirm,
+  onOpenActionModal,
   onRequestMapInteraction,
-  onLocationSearchPreview,
+  onRelocateRequest,
   planPreview,
   plan,
   onCommitGridField,
-  mapRef,
   hasProjectLocation,
   hasSimulationResults = false,
 }: {
@@ -582,25 +596,19 @@ function ScenarioPanel({
   /** Applied to scenario state and mirrored into project config (simulation). */
   onWeatherFetched?: (next: WeatherValues) => void;
   onWeatherFetchedAtCoords?: (next: WeatherValues, coords: { lat: number; lng: number }, label?: string) => void;
-  onActionConfirm?: (payload: ActionPayload) => void;
+  onOpenActionModal?: (actionId: ActionId) => void;
   onRequestMapInteraction?: (
     mode: MapInteractionMode,
     action?: "location" | "fuel-break" | "line-ignition",
   ) => void;
-  onLocationSearchPreview?: (
-    preview: {
-      lat: number;
-      lng: number;
-      boundaryGeoJSON: BoundaryGeoJSON;
-    } | null,
-  ) => void;
+  /** Emits upward — modal host owns the relocate confirm dialog */
+  onRelocateRequest?: () => void;
   planPreview?: { segments: number; fuelBreaks: number; centerSet: boolean };
   plan?: IgnitionPlan;
   onCommitGridField?: (
     field: "cellResolution" | "cellSpaceDimension" | "cellSpaceDimensionLat",
     value: number,
   ) => void;
-  mapRef?: import("leaflet").Map | null;
   hasProjectLocation: boolean;
   /** True after a simulation has been run and results received. Location becomes locked. */
   hasSimulationResults?: boolean;
@@ -611,10 +619,7 @@ function ScenarioPanel({
   const [weatherQuery, setWeatherQuery] = useState("");
   const [fetching, setFetching] = useState(false);
   const [weatherFetchError, setWeatherFetchError] = useState<string | null>(null);
-  const [weatherFetchHint, setWeatherFetchHint] = useState<string | null>(null);
-  const [activeAction, setActiveAction] = useState<ActionId | null>(null);
   const [cellGridOpen, setCellGridOpen] = useState(false);
-  const [relocateConfirmOpen, setRelocateConfirmOpen] = useState(false);
 
   // Location is locked once a simulation has been run and received.
   const locationLocked = hasSimulationResults;
@@ -623,8 +628,8 @@ function ScenarioPanel({
     if (id === "location") {
       if (locationLocked) return;
       if (hasProjectLocation) {
-        // Location already set but no simulation yet — confirm relocation
-        setRelocateConfirmOpen(true);
+        // Location already set but no simulation yet — emit upward for modal host
+        onRelocateRequest?.();
         return;
       }
     }
@@ -639,8 +644,7 @@ function ScenarioPanel({
       }
     } else {
       if (id === "fuel-break" && !hasProjectLocation) return;
-      // location and fuel-break open their own dedicated modals
-      setActiveAction(id);
+      onOpenActionModal?.(id);
     }
   }
 
@@ -652,7 +656,6 @@ function ScenarioPanel({
     if (!weatherQuery.trim()) return;
     setFetching(true);
     setWeatherFetchError(null);
-    setWeatherFetchHint(null);
     try {
       const res = await fetch(
         `/api/weather/zip?q=${encodeURIComponent(weatherQuery.trim())}`,
@@ -677,7 +680,7 @@ function ScenarioPanel({
       ) {
         onWeatherFetchedAtCoords(json.weather, { lat: json.lat, lng: json.lng }, json.placeLabel);
       }
-      setWeatherFetchHint(
+      toast.success(
         json.placeLabel
           ? `${json.placeLabel} · current conditions (Open-Meteo)`
           : "Current conditions loaded (Open-Meteo)",
@@ -734,38 +737,6 @@ function ScenarioPanel({
                 </p>
               ) : null}
 
-              {/* Relocate confirmation dialog */}
-              <Dialog open={relocateConfirmOpen} onOpenChange={setRelocateConfirmOpen}>
-                <DialogContent className="max-w-sm border-white/10 bg-[#141414] text-white shadow-xl">
-                  <DialogTitle className="text-sm font-semibold tracking-tight text-white/90">
-                    Change project location?
-                  </DialogTitle>
-                  <DialogDescription className="text-[11px] leading-relaxed text-white/55">
-                    Moving to a new location will reset all scenario data including ignition lines, fuel breaks,
-                    terrain overlays, and simulation results. Your chat history will be preserved.
-                  </DialogDescription>
-                  <div className="flex justify-end gap-2 pt-1">
-                    <DialogClose asChild>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:bg-white/10"
-                      >
-                        Cancel
-                      </button>
-                    </DialogClose>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRelocateConfirmOpen(false);
-                        setActiveAction("location");
-                      }}
-                      className="rounded-lg bg-amber-500/90 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-amber-600"
-                    >
-                      Change Location
-                    </button>
-                  </div>
-                </DialogContent>
-              </Dialog>
             </motion.div>
 
             <AnimatePresence initial={false}>
@@ -817,8 +788,8 @@ function ScenarioPanel({
 
           {plan && onCommitGridField ? (
             <div className="border-t border-white/6 pt-2.5 sm:pt-3">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={() => setCellGridOpen((v) => !v)}
                 className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-white/65 transition hover:bg-white/5 hover:text-white/85"
               >
@@ -831,7 +802,7 @@ function ScenarioPanel({
                 <span className="text-[10px] font-semibold uppercase tracking-wide sm:text-[11px]">
                   Cell Grid
                 </span>
-              </button>
+              </Button>
               <AnimatePresence initial={false}>
                 {cellGridOpen ? (
                   <motion.div
@@ -903,56 +874,33 @@ function ScenarioPanel({
             <div className="mt-2 space-y-1.5 border-t border-white/6 pt-2.5 sm:space-y-2 sm:pt-3">
               <SectionLabel>Weather Lookup</SectionLabel>
               <div className="flex flex-col gap-1.5 sm:flex-row sm:items-stretch sm:gap-2">
-                <input
+                <Input
                   value={weatherQuery}
                   onChange={(e) => setWeatherQuery(e.target.value)}
                   placeholder="City, address, or US ZIP"
                   autoComplete="postal-code"
-                  className="min-h-[32px] min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] text-white placeholder:text-white/25 outline-none focus:border-white/20 sm:px-3 sm:py-2 sm:text-[11px]"
+                  className="min-h-[32px] min-w-0 flex-1 rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] text-white placeholder:text-white/25 focus-visible:ring-white/20 sm:px-3 sm:py-2 sm:text-[11px]"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={() => void handleFetchWeather()}
                   disabled={!weatherQuery.trim() || fetching}
-                  className="min-h-[32px] shrink-0 rounded-lg bg-orange-500/20 px-3 py-1.5 text-[10px] font-medium text-orange-400 transition hover:bg-orange-500/30 disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[72px] sm:px-4 sm:text-[11px]"
+                  className="min-h-[32px] shrink-0 rounded-lg bg-orange-500/20 px-3 py-1.5 text-[10px] font-medium text-orange-400 hover:bg-orange-500/30 sm:min-w-[72px] sm:px-4 sm:text-[11px]"
                 >
                   {fetching ? "…" : "Fetch"}
-                </button>
+                </Button>
               </div>
               {weatherFetchError ? (
                 <p className="text-[9px] leading-snug text-red-400/90 sm:text-[10px]">{weatherFetchError}</p>
               ) : null}
-              {weatherFetchHint ? (
-                <p className="text-[9px] leading-snug text-emerald-400/80 sm:text-[10px]">{weatherFetchHint}</p>
-              ) : (
-                <p className="text-[9px] text-white/25 sm:text-[10px]">
-                  Enter a city, street address, or US ZIP. Weather fields are auto-populated from Open-Meteo.
-                </p>
-              )}
+              <p className="text-[9px] text-white/25 sm:text-[10px]">
+                Enter a city, street address, or US ZIP. Weather fields are auto-populated from Open-Meteo.
+              </p>
             </div>
           </div>
         </div>
       </AccordionSection>
 
-      <ActionModal
-        actionId={activeAction}
-        onClose={() => {
-          if (activeAction === "location") onLocationSearchPreview?.(null);
-          setActiveAction(null);
-        }}
-        onConfirm={(payload) => {
-          onActionConfirm?.(payload);
-          setActiveAction(null);
-        }}
-        onRequestMapDraw={(mode) => {
-          const action = activeAction === "fuel-break" ? "fuel-break" : "location";
-          setActiveAction(null);
-          onRequestMapInteraction?.(mode, action);
-        }}
-        mapRef={mapRef}
-        onLocationSearchPreview={onLocationSearchPreview}
-        currentPlan={plan}
-      />
     </Panel>
   );
 }
@@ -981,30 +929,30 @@ function MapControlsPanel({
     <Panel className="overflow-hidden">
       {/* Zoom buttons — side by side */}
       <div className="flex border-b border-white/6">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => mapRef?.zoomIn()}
-          className="flex h-7 flex-1 items-center justify-center border-r border-white/6 text-sm font-bold text-white/50 transition hover:bg-white/5 hover:text-white/90 sm:h-8"
+          className="h-7 flex-1 rounded-none border-r border-white/6 text-sm font-bold text-white/50 hover:bg-white/5 hover:text-white/90 sm:h-8"
           aria-label="Zoom in"
         >
           +
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="ghost"
           onClick={() => mapRef?.zoomOut()}
-          className="flex h-7 flex-1 items-center justify-center text-sm font-bold text-white/50 transition hover:bg-white/5 hover:text-white/90 sm:h-8"
+          className="h-7 flex-1 rounded-none text-sm font-bold text-white/50 hover:bg-white/5 hover:text-white/90 sm:h-8"
           aria-label="Zoom out"
         >
           −
-        </button>
+        </Button>
       </div>
 
       {/* Map style dropdown */}
       <div className="relative">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => setStyleOpen((o) => !o)}
-          className="flex w-full items-center justify-between gap-1.5 px-2 py-1.5 text-[9px] font-medium text-white/50 transition hover:bg-white/5 hover:text-white/80 sm:text-[10px]"
+          className="h-auto w-full justify-between gap-1.5 px-2 py-1.5 text-[9px] font-medium text-white/50 hover:bg-white/5 hover:text-white/80 sm:text-[10px]"
         >
           <span>{currentLabel}</span>
           <ChevronRight
@@ -1013,7 +961,7 @@ function MapControlsPanel({
               styleOpen && "rotate-90",
             )}
           />
-        </button>
+        </Button>
         <AnimatePresence initial={false}>
           {styleOpen && (
             <motion.div
@@ -1026,19 +974,19 @@ function MapControlsPanel({
             >
               <div className="flex flex-col gap-0.5 p-1">
                 {MAP_STYLES.map(({ id, label }) => (
-                  <button
+                  <Button
                     key={id}
-                    type="button"
+                    variant="ghost"
                     onClick={() => { onMapStyleChange(id); setStyleOpen(false); }}
                     className={cn(
-                      "rounded-md px-1.5 py-1 text-left text-[9px] font-medium transition sm:text-[10px]",
+                      "h-auto w-full justify-start rounded-md px-1.5 py-1 text-left text-[9px] font-medium sm:text-[10px]",
                       mapStyle === id
                         ? "bg-orange-500/20 text-orange-400"
                         : "text-white/40 hover:bg-white/5 hover:text-white/70",
                     )}
                   >
                     {label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </motion.div>
@@ -1194,13 +1142,13 @@ function TerrainDataPanel({
         {/* Exclusive layer selector */}
         <div className="space-y-2">
           {LAYERS.map(({ id, label, loadedKey }) => (
-            <button
+            <Button
               key={id}
-              type="button"
+              variant="ghost"
               onClick={() => selectLayer(id)}
               disabled={state.loading}
               className={cn(
-                "flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-[10px] transition sm:text-[11px]",
+                "h-auto w-full justify-between rounded-md border px-2 py-1.5 text-[10px] sm:text-[11px]",
                 activeLayer === id
                   ? "border-sky-400/40 bg-sky-500/15 text-sky-200"
                   : "border-white/10 bg-white/4 text-white/60 hover:border-white/20 hover:text-white/80",
@@ -1216,16 +1164,16 @@ function TerrainDataPanel({
                   <span className="text-[9px] font-medium uppercase tracking-wide">active</span>
                 ) : null}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
 
         {/* Fetch button */}
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           disabled={!hasSelection || state.loading}
           onClick={() => void handleFetch()}
-          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-sky-500/20 py-1.5 text-[10px] font-medium text-sky-200 transition hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-40 sm:text-[11px]"
+          className="h-auto w-full rounded-md bg-sky-500/20 py-1.5 text-[10px] font-medium text-sky-200 hover:bg-sky-500/30 sm:text-[11px]"
         >
           {state.loading ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -1233,7 +1181,7 @@ function TerrainDataPanel({
             <Database className="h-3 w-3" />
           )}
           {state.loading ? "Fetching…" : "Fetch Data"}
-        </button>
+        </Button>
 
         {!state.loading && activeLayer && !activeHasData ? (
           <p className="text-[9px] leading-snug text-white/35 sm:text-[10px]">
@@ -1287,23 +1235,27 @@ function IgnitionModeSelect({
   }, [teamIndex, segIndex, mode, value, onSegmentEdit]);
 
   return (
-    <select
+    <Select
       value={value}
-      onChange={(e) =>
+      onValueChange={(nextValue) =>
         onSegmentEdit({
           teamIndex,
           segmentIndex: segIndex,
-          mode: e.target.value as IgnitionMode,
+          mode: nextValue as IgnitionMode,
         })
       }
-      className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
     >
-      {options.map((m) => (
-        <option key={m.value} value={m.value} className="bg-zinc-900">
-          {m.label}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger className="h-auto w-full border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 sm:text-[11px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((m) => (
+          <SelectItem key={m.value} value={m.value}>
+            {m.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -1346,20 +1298,24 @@ function IgnitionTeamSelect({
 }) {
   const safeIndex = Math.min(Math.max(0, teamIndex), IGNITION_TEAM_PICKER_COUNT - 1);
   return (
-    <select
-      value={safeIndex}
-      onChange={(e) => {
-        const next = parseInt(e.target.value, 10);
+    <Select
+      value={String(safeIndex)}
+      onValueChange={(nextValue) => {
+        const next = parseInt(nextValue, 10);
         onSegmentEdit({ teamIndex, segmentIndex, moveToTeamIndex: next });
       }}
-      className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
     >
-      {Array.from({ length: IGNITION_TEAM_PICKER_COUNT }, (_, i) => (
-        <option key={i} value={i} className="bg-zinc-900">
-          Team {i + 1}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger className="h-auto w-full border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/80 sm:text-[11px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {Array.from({ length: IGNITION_TEAM_PICKER_COUNT }, (_, i) => (
+          <SelectItem key={i} value={String(i)}>
+            Team {i + 1}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -1367,7 +1323,7 @@ function IgnitionGroupHeader({ label, count }: { label: string; count: number })
   return (
     <div
       role="presentation"
-      className="flex items-center gap-2 bg-white/[0.04] px-2.5 py-1.5 sm:px-3"
+      className="flex items-center gap-2 bg-white/4 px-2.5 py-1.5 sm:px-3"
     >
       <span className="text-[9px] font-semibold uppercase tracking-wider text-white/45">
         {label}
@@ -1431,10 +1387,10 @@ function IgnitionParametersPanel({
     if (row.kind === "point") {
       return (
         <div key={key} className="pointer-events-auto">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={() => setOpenKey(isOpen ? null : key)}
-            className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
+            className="h-auto w-full justify-start gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/3 sm:px-3 sm:py-2"
           >
             <ChevronRight
               className={cn(
@@ -1446,7 +1402,7 @@ function IgnitionParametersPanel({
               Point · {segIndex + 1}
               <span className="ml-1 text-white/30">(Team {teamLabel})</span>
             </span>
-          </button>
+          </Button>
 
           <AnimatePresence initial={false}>
             {isOpen && (
@@ -1462,7 +1418,7 @@ function IgnitionParametersPanel({
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-0.5">
                       <span className="text-[9px] text-white/35 sm:text-[10px]">X (cell)</span>
-                      <input
+                      <Input
                         type="number"
                         step={1}
                         value={seg.start_x}
@@ -1474,12 +1430,12 @@ function IgnitionParametersPanel({
                             y: seg.start_y,
                           })
                         }
-                        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+                        className="h-auto w-full border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 focus-visible:ring-orange-400/40 sm:text-[11px]"
                       />
                     </div>
                     <div className="space-y-0.5">
                       <span className="text-[9px] text-white/35 sm:text-[10px]">Y (cell)</span>
-                      <input
+                      <Input
                         type="number"
                         step={1}
                         value={seg.start_y}
@@ -1491,7 +1447,7 @@ function IgnitionParametersPanel({
                             y: Math.round(Number(e.target.value)),
                           })
                         }
-                        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:text-[11px]"
+                        className="h-auto w-full border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 focus-visible:ring-orange-400/40 sm:text-[11px]"
                       />
                     </div>
                   </div>
@@ -1509,7 +1465,7 @@ function IgnitionParametersPanel({
 
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[9px] text-white/35 sm:text-[10px]">Speed (m/s)</span>
-                    <input
+                    <Input
                       type="number"
                       min={0.01}
                       max={10}
@@ -1522,7 +1478,7 @@ function IgnitionParametersPanel({
                           speed: parseFloat(e.target.value) || seg.speed,
                         })
                       }
-                      className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                      className="h-auto w-16 border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 focus-visible:ring-orange-400/40 sm:w-18 sm:text-[11px]"
                     />
                   </div>
 
@@ -1535,17 +1491,17 @@ function IgnitionParametersPanel({
                     />
                   </div>
 
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     onClick={() => {
                       onSegmentDelete(teamIndex, segIndex);
                       setOpenKey(null);
                     }}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                    className="h-auto w-full rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
                   >
                     <Trash2 className="h-3 w-3" />
                     Remove point
-                  </button>
+                  </Button>
                 </div>
               </motion.div>
             )}
@@ -1560,10 +1516,10 @@ function IgnitionParametersPanel({
 
     return (
       <div key={key} className="pointer-events-auto">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => setOpenKey(isOpen ? null : key)}
-          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
+          className="h-auto w-full justify-start gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/3 sm:px-3 sm:py-2"
         >
           <ChevronRight
             className={cn(
@@ -1576,7 +1532,7 @@ function IgnitionParametersPanel({
             <span className="ml-1 text-white/30">(Team {teamLabel})</span>
           </span>
           <span className="shrink-0 text-[9px] text-white/30">{dist}c</span>
-        </button>
+        </Button>
 
         <AnimatePresence initial={false}>
           {isOpen && (
@@ -1602,7 +1558,7 @@ function IgnitionParametersPanel({
 
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[9px] text-white/35 sm:text-[10px]">Speed (m/s)</span>
-                  <input
+                  <Input
                     type="number"
                     min={0.01}
                     max={10}
@@ -1615,13 +1571,13 @@ function IgnitionParametersPanel({
                         speed: parseFloat(e.target.value) || seg.speed,
                       })
                     }
-                    className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                    className="h-auto w-16 border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 focus-visible:ring-orange-400/40 sm:w-18 sm:text-[11px]"
                   />
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[9px] text-white/35 sm:text-[10px]">Distance (cells)</span>
-                  <input
+                  <Input
                     type="number"
                     min={1}
                     step={1}
@@ -1634,7 +1590,7 @@ function IgnitionParametersPanel({
                         distance: e.target.value === "" ? null : parseInt(e.target.value),
                       })
                     }
-                    className="w-16 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 outline-none focus:border-orange-400/40 sm:w-18 sm:text-[11px]"
+                    className="h-auto w-16 border-white/10 bg-white/5 px-2 py-1 text-center text-[10px] text-white/80 focus-visible:ring-orange-400/40 sm:w-18 sm:text-[11px]"
                   />
                 </div>
 
@@ -1653,17 +1609,17 @@ function IgnitionParametersPanel({
                   </p>
                 </div>
 
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={() => {
                     onSegmentDelete(teamIndex, segIndex);
                     setOpenKey(null);
                   }}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                  className="h-auto w-full rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
                 >
                   <Trash2 className="h-3 w-3" />
                   Remove line
-                </button>
+                </Button>
               </div>
             </motion.div>
           )}
@@ -1745,10 +1701,10 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
 
           return (
             <div key={idx} className="pointer-events-auto">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onClick={() => setOpenIdx(isOpen ? null : idx)}
-                className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition hover:bg-white/3 sm:px-3 sm:py-2"
+                className="h-auto w-full justify-start gap-1.5 px-2.5 py-1.5 text-left hover:bg-white/3 sm:px-3 sm:py-2"
               >
                 <ChevronRight
                   className={cn(
@@ -1760,7 +1716,7 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
                   Break {idx + 1}
                 </span>
                 <span className="shrink-0 text-[9px] text-white/30">{w}×{h}c</span>
-              </button>
+              </Button>
 
               <AnimatePresence initial={false}>
                 {isOpen && (
@@ -1782,17 +1738,17 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
                       </div>
 
                       {/* Delete */}
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
                         onClick={() => {
                           onFuelBreakDelete(idx);
                           setOpenIdx(null);
                         }}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                        className="h-auto w-full rounded-md border border-red-500/20 py-1 text-[10px] text-red-400/60 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
                       >
                         <Trash2 className="h-3 w-3" />
                         Remove break
-                      </button>
+                      </Button>
                     </div>
                   </motion.div>
                 )}
@@ -1812,10 +1768,13 @@ function FuelBreaksPanel({ plan, onFuelBreakDelete }: FuelBreaksPanelProps) {
 
 type MapOverlayPanelsProps = {
   stats?: SimStats;
-  messages: UIMessage[];
+  projectTitle?: string;
+  onOpenActionModal?: (actionId: ActionId) => void;
   onStartSimulation?: (simulationTimesteps: number) => void;
-  onAskAgent?: () => void;
-  onResetProject?: () => void;
+  /** Emits upward — modal host owns the reset confirm dialog */
+  onResetRequest?: () => void;
+  /** Emits upward — modal host owns the relocate confirm dialog */
+  onRelocateRequest?: () => void;
   weather: WeatherValues;
   onWeatherOverride: (field: keyof WeatherValues, value: number) => void;
   onWeatherFetched?: (next: WeatherValues) => void;
@@ -1824,17 +1783,9 @@ type MapOverlayPanelsProps = {
     coords: { lat: number; lng: number },
     label?: string,
   ) => void;
-  onActionConfirm?: (payload: ActionPayload) => void;
   onRequestMapInteraction?: (
     mode: MapInteractionMode,
     action?: "location" | "fuel-break" | "line-ignition",
-  ) => void;
-  onLocationSearchPreview?: (
-    preview: {
-      lat: number;
-      lng: number;
-      boundaryGeoJSON: BoundaryGeoJSON;
-    } | null,
   ) => void;
   planPreview?: { segments: number; fuelBreaks: number; centerSet: boolean };
   /** True once a project boundary exists (drawn, geocoded, or synthetic grid footprint). */
@@ -1863,22 +1814,29 @@ type MapOverlayPanelsProps = {
   /** True after a simulation has been run and results received */
   hasSimulationResults?: boolean;
   simulationRunning?: boolean;
+  simulationTimesteps?: number;
+  onSimulationTimestepsChange?: (value: number) => void;
   playbackRate?: number;
   onPlaybackRateChange?: (rate: number) => void;
+  replayState?: "idle" | "playing" | "paused";
+  canReplay?: boolean;
+  onReplayPlay?: () => void;
+  onReplayPause?: () => void;
+  layout?: "overlay" | "map-utilities" | "run-config-overlay";
 };
 
 export function MapOverlayPanels({
   stats,
+  projectTitle = "Untitled project",
+  onOpenActionModal,
   onStartSimulation,
-  onAskAgent,
-  onResetProject,
+  onResetRequest,
+  onRelocateRequest,
   weather,
   onWeatherOverride,
   onWeatherFetched,
   onWeatherFetchedAtCoords,
-  onActionConfirm,
   onRequestMapInteraction,
-  onLocationSearchPreview,
   planPreview,
   hasProjectLocation = false,
   mapStyle,
@@ -1895,9 +1853,54 @@ export function MapOverlayPanels({
   onCommitPlanGridField,
   hasSimulationResults = false,
   simulationRunning = false,
+  simulationTimesteps = 12000,
+  onSimulationTimestepsChange,
   playbackRate = 1,
   onPlaybackRateChange,
+  replayState = "idle",
+  canReplay = false,
+  onReplayPlay,
+  onReplayPause,
+  layout = "overlay",
 }: MapOverlayPanelsProps) {
+  if (layout === "run-config-overlay") {
+    return (
+      <div className="pointer-events-none absolute right-2 top-2 z-450 sm:right-3 sm:top-3">
+        <RunConfigPanel
+          onStartSimulation={onStartSimulation}
+          onResetRequest={onResetRequest}
+          runActionsEnabled={runActionsEnabled}
+          simulationRunning={simulationRunning}
+          simulationTimesteps={simulationTimesteps}
+          onSimulationTimestepsChange={onSimulationTimestepsChange}
+          playbackRate={playbackRate}
+          onPlaybackRateChange={onPlaybackRateChange}
+          replayState={replayState}
+          canReplay={canReplay}
+          onReplayPlay={onReplayPlay}
+          onReplayPause={onReplayPause}
+        />
+      </div>
+    );
+  }
+
+  if (layout === "map-utilities") {
+    return (
+      <div className="pointer-events-none absolute bottom-16 right-2 z-450 flex flex-col gap-1.5 sm:bottom-20 sm:right-3 sm:gap-2">
+        {terrainState && onTerrainChange && projectConfig && (
+          <TerrainDataPanel
+            centerSet={!!projectConfig.boundaryGeoJSON}
+            plan={projectConfig}
+            weather={weather}
+            state={terrainState}
+            onChange={onTerrainChange}
+          />
+        )}
+        <MapControlsPanel mapStyle={mapStyle} onMapStyleChange={onMapStyleChange} mapRef={mapRef} />
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Top-left: Scenario + Run Config side by side, with Ignition Lines below Run Config */}
@@ -1907,13 +1910,12 @@ export function MapOverlayPanels({
           onWeatherOverride={onWeatherOverride}
           onWeatherFetched={onWeatherFetched}
           onWeatherFetchedAtCoords={onWeatherFetchedAtCoords}
-          onActionConfirm={onActionConfirm}
+          onOpenActionModal={onOpenActionModal}
           onRequestMapInteraction={onRequestMapInteraction}
-          onLocationSearchPreview={onLocationSearchPreview}
+          onRelocateRequest={onRelocateRequest}
           planPreview={planPreview}
           plan={projectConfig}
           onCommitGridField={onCommitPlanGridField}
-          mapRef={mapRef}
           hasProjectLocation={hasProjectLocation}
           hasSimulationResults={hasSimulationResults}
           playbackRate={playbackRate}
@@ -1922,12 +1924,15 @@ export function MapOverlayPanels({
         <div className="flex flex-col gap-1.5 sm:gap-2">
           <RunConfigPanel
             onStartSimulation={onStartSimulation}
-            onAskAgent={onAskAgent}
-            onResetProject={onResetProject}
+            onResetRequest={onResetRequest}
             runActionsEnabled={runActionsEnabled}
             simulationRunning={simulationRunning}
             playbackRate={playbackRate}
             onPlaybackRateChange={onPlaybackRateChange}
+            replayState={replayState}
+            canReplay={canReplay}
+            onReplayPlay={onReplayPlay}
+            onReplayPause={onReplayPause}
           />
           {projectConfig && onSegmentEdit && onSegmentDelete && onPointIgnitionEdit && (
             <IgnitionParametersPanel

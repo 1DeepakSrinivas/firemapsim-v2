@@ -5,6 +5,8 @@ import { Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { slideFromBottom } from "@/lib/transitions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type WeatherField = "windSpeed" | "windDirection" | "temperature" | "humidity";
 
@@ -48,7 +50,7 @@ function WeatherRow({
       <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <div className="flex items-center gap-2 text-sm text-foreground">
         {isEditing ? (
-          <input
+          <Input
             autoFocus
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -72,7 +74,7 @@ function WeatherRow({
                 setIsEditing(false);
               }
             }}
-            className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-sm"
+            className="h-auto w-20 border-input bg-background px-2 py-1 text-right text-sm"
           />
         ) : (
           <span>
@@ -81,17 +83,18 @@ function WeatherRow({
           </span>
         )}
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label={`Edit ${label}`}
           onClick={() => {
             setDraft(String(value));
             setIsEditing(true);
           }}
-          className="rounded p-1 text-muted-foreground hover:bg-muted"
+          className="size-6 rounded p-1 text-muted-foreground hover:bg-muted"
         >
           <Pencil size={14} />
-        </button>
+        </Button>
       </div>
     </div>
   );

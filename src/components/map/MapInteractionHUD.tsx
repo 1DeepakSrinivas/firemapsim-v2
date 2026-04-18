@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { X, Check } from "lucide-react";
 import type { MapInteractionMode } from "./MapInteractionLayer";
+import { Button } from "@/components/ui/button";
 
 const INSTRUCTIONS: Record<NonNullable<MapInteractionMode>, string> = {
   pin: "Click anywhere on the map to drop the ignition pin",
@@ -42,23 +43,25 @@ export function MapInteractionHUD({
           <span className="h-2 w-2 animate-pulse rounded-full bg-orange-400" />
           <span className="text-[11px] text-white/70">{INSTRUCTIONS[mode]}</span>
           {canConfirm && onConfirm ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onConfirm}
-              className="flex items-center gap-1 rounded-full bg-orange-500/30 px-2.5 py-1 text-[10px] font-medium text-orange-200 transition hover:bg-orange-500/45"
+              className="h-auto rounded-full bg-orange-500/30 px-2.5 py-1 text-[10px] font-medium text-orange-200 hover:bg-orange-500/45"
             >
               <Check className="h-3 w-3" />
               Done
-            </button>
+            </Button>
           ) : null}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onCancel}
-            className="flex items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[10px] text-white/50 transition hover:bg-white/15 hover:text-white/80"
+            className="h-auto rounded-full bg-white/8 px-2.5 py-1 text-[10px] text-white/50 hover:bg-white/15 hover:text-white/80"
           >
             <X className="h-3 w-3" />
             Cancel
-          </button>
+          </Button>
           </div>
           {hint ? (
             <motion.p
