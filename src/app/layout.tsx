@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fustat, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
+import { ThemeProvider, THEME_INIT_SCRIPT } from "@/components/theme/ThemeProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const fustatSans = Fustat({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
@@ -24,11 +26,32 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full dark">
+    <html lang="en" className="h-full" suppressHydrationWarning>
+      <head>
+        <script
+          // Prevent flash by resolving theme mode before hydration.
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} min-h-full flex flex-col font-sans antialiased`}
+        className={`${fustatSans.variable} ${geistMono.variable} min-h-full flex flex-col font-sans antialiased`}
       >
-        <ClerkProvider>{children}</ClerkProvider>
+        <ClerkProvider>
+          <ThemeProvider>
+            {children}
+            <Toaster
+              theme="system"
+              richColors
+              toastOptions={{
+                style: {
+                  background: "var(--card)",
+                  color: "var(--card-foreground)",
+                  border: "1px solid var(--border)",
+                },
+              }}
+            />
+          </ThemeProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
