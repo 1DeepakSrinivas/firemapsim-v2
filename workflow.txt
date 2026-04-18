@@ -1,5 +1,4 @@
 Workflow:
-
 Agentic:
 - Via Chat:
     - Chat with the agent to get the information you need
