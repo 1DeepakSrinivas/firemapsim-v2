@@ -50,6 +50,10 @@ const putBodySchema = z.object({
   agentChatIntroDone: z.boolean().optional(),
 });
 
+const patchTitleBodySchema = z.object({
+  title: z.string().min(1).max(240),
+});
+
 type ProjectSelectCandidate = {
   select: string;
   hasLastSimulation: boolean;
@@ -485,6 +489,19 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Defensive cleanup for environments where FK cascade may be missing/outdated.
+  const { error: chatDeleteErr } = await supabase
+    .from("chat_messages")
+    .delete()
+    .eq("project_id", projectId);
+  if (
+    chatDeleteErr &&
+    chatDeleteErr.code !== "42703" &&
+    chatDeleteErr.code !== "PGRST204"
+  ) {
+    return NextResponse.json({ error: chatDeleteErr.message }, { status: 500 });
+  }
+
   const { error: deleteErr } = await supabase
     .from("map_projects")
     .delete()
@@ -496,4 +513,57 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
 
   return NextResponse.json({ ok: true, id: projectId });
+}
+
+export async function PATCH(request: Request, context: RouteContext) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const parsed = projectIdSchema.safeParse((await context.params).projectId);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid project" }, { status: 400 });
+  }
+  const projectId = parsed.data;
+
+  let body: z.infer<typeof patchTitleBodySchema>;
+  try {
+    body = patchTitleBodySchema.parse(await request.json());
+  } catch {
+    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+  }
+
+  const { data: existing, error: findErr } = await supabase
+    .from("map_projects")
+    .select("id, user_id")
+    .eq("id", projectId)
+    .maybeSingle();
+
+  if (findErr || !existing || existing.user_id !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const { data, error } = await updateProjectCompat(projectId, userId, {
+    title: body.title,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (!data) {
+    return NextResponse.json(
+      { error: "Project was not updated (not found or access denied)." },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    id: data.id,
+    title: body.title,
+    updatedAt: data.updated_at,
+  });
 }

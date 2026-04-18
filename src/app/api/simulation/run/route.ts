@@ -79,19 +79,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const clerkUser = await currentUser();
-  await upsertLocalUserFromClerk({
-    clerkUserId: userId,
-    username: clerkUser?.username ?? null,
-    email: clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    name:
-      [clerkUser?.firstName, clerkUser?.lastName]
-        .filter(Boolean)
-        .join(" ") || clerkUser?.username || null,
-    imageUrl: clerkUser?.imageUrl ?? null,
-  });
-
   try {
+    const clerkUser = await currentUser();
+    try {
+      await upsertLocalUserFromClerk({
+        clerkUserId: userId,
+        username: clerkUser?.username ?? null,
+        email: clerkUser?.primaryEmailAddress?.emailAddress ?? null,
+        name:
+          [clerkUser?.firstName, clerkUser?.lastName]
+            .filter(Boolean)
+            .join(" ") || clerkUser?.username || null,
+        imageUrl: clerkUser?.imageUrl ?? null,
+      });
+    } catch (error) {
+      console.warn("Failed to sync Clerk user before simulation run.", error);
+    }
+
     const json = await request.json();
     const body = simulationRunBodySchema.parse(json);
 
