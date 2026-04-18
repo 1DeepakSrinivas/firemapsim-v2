@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import {
   CedarCaptionChat,
+  type AgentCommandTrigger,
   type RunTrigger,
   type SetupUpdate,
 } from "@/chatComponents/CedarCaptionChat";
@@ -20,6 +21,7 @@ import type { MapInteractionMode } from "@/components/map/MapInteractionLayer";
 import { MapOverlayPanels, type MapStyleId } from "@/components/map/MapOverlayPanels";
 import { WorkspaceSidebar } from "@/components/map/WorkspaceSidebar";
 import { WorkspaceModalHost } from "@/components/map/WorkspaceModalHost";
+import { WorkflowModeBanner } from "@/components/map/WorkflowModeBanner";
 import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import type {
@@ -47,6 +49,12 @@ import {
 } from "@/types/ignitionPlan";
 import type { TerrainOverlayState } from "@/components/map/MapOverlayPanels";
 import type { LastSimulationSnapshot } from "@/types/lastSimulation";
+import {
+  createProjectWorkspaceStore,
+  useProjectWorkspaceStore,
+  type IgnitionPlanLoosePatch,
+  type ProjectWorkflowMode,
+} from "@/stores/projectWorkspaceStore";
 
 const DEFAULT_WEATHER: WeatherValues = {
   windSpeed: 10,
@@ -147,6 +155,7 @@ export function ProjectWorkspace({
   const [replayFrame, setReplayFrame] = useState<FireOverlayPoint[] | null>(null);
   const [replayState, setReplayState] = useState<"idle" | "playing" | "paused">("idle");
   const [replayCursor, setReplayCursor] = useState<number | null>(null);
+  const [autoReplayAfterRun, setAutoReplayAfterRun] = useState(false);
   const [simulationRun, setSimulationRun] = useState<{
     status: "idle" | "running" | "ready" | "error";
     error: string | null;
@@ -154,14 +163,20 @@ export function ProjectWorkspace({
   }>({ status: "idle", error: null });
   const [drawnShapes, setDrawnShapes] = useState<PolygonFeature[]>([]);
   const [mapStyle, setMapStyle] = useState<MapStyleId>("terrain");
-
-  const [weather, setWeather] = useState<WeatherValues>({ ...DEFAULT_WEATHER });
   const [weatherOverrides, setWeatherOverrides] =
     useState<WeatherOverrideState>({});
 
   const weatherOverridesRef = useRef<WeatherOverrideState>({});
-
-  const [projectConfig, setProjectConfig] = useState<IgnitionPlan>(() => defaultIgnitionPlan());
+  const workspaceStoreRef = useRef(
+    createProjectWorkspaceStore({
+      plan: defaultIgnitionPlan(),
+      mode: null,
+    }),
+  );
+  const workspaceStore = workspaceStoreRef.current;
+  const projectConfig = useProjectWorkspaceStore(workspaceStore, (state) => state.plan);
+  const workflowMode = useProjectWorkspaceStore(workspaceStore, (state) => state.mode);
+  const setProjectConfig = workspaceStore.replacePlan;
 
   const [terrainState, setTerrainState] = useState<TerrainOverlayState>({ ...INITIAL_TERRAIN });
 
@@ -176,7 +191,6 @@ export function ProjectWorkspace({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [hydrated, setHydrated] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [simulationTimesteps, setSimulationTimesteps] = useState(12000);
   const [projectMissing, setProjectMissing] = useState(false);
 
   const skipSaveAfterLoadRef = useRef(true);
@@ -215,6 +229,34 @@ export function ProjectWorkspace({
   }, [weatherOverrides]);
 
   useEffect(() => {
+    workspaceStore.reset({
+      plan: defaultIgnitionPlan(),
+      mode: null,
+    });
+  }, [projectId, workspaceStore]);
+
+  const weather = useMemo<WeatherValues>(
+    () => ({
+      windSpeed: projectConfig.windSpeed,
+      windDirection: projectConfig.windDegree,
+      temperature:
+        typeof projectConfig.temperature === "number"
+          ? projectConfig.temperature
+          : DEFAULT_WEATHER.temperature,
+      humidity:
+        typeof projectConfig.humidity === "number"
+          ? projectConfig.humidity
+          : DEFAULT_WEATHER.humidity,
+    }),
+    [
+      projectConfig.windSpeed,
+      projectConfig.windDegree,
+      projectConfig.temperature,
+      projectConfig.humidity,
+    ],
+  );
+
+  useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 1024px)");
     const syncViewport = () => setIsDesktopViewport(mediaQuery.matches);
     syncViewport();
@@ -250,6 +292,11 @@ export function ProjectWorkspace({
 
   const replayFrameRef = useRef<number | null>(null);
   const replayLastTsRef = useRef<number | null>(null);
+  const autoReplayAfterRunRef = useRef(false);
+
+  useEffect(() => {
+    autoReplayAfterRunRef.current = autoReplayAfterRun;
+  }, [autoReplayAfterRun]);
 
   const stopReplayAnimation = useCallback(() => {
     if (replayFrameRef.current !== null) {
@@ -377,7 +424,14 @@ export function ProjectWorkspace({
           throw new Error(json.error ?? `Simulation failed (${res.status})`);
         }
         if (json.weatherUsed) {
-          setWeather(mergeWeather(json.weatherUsed, weatherOverridesRef.current));
+          const merged = mergeWeather(json.weatherUsed, weatherOverridesRef.current);
+          setProjectConfig((prev) => ({
+            ...prev,
+            windSpeed: merged.windSpeed,
+            windDegree: merged.windDirection,
+            temperature: merged.temperature,
+            humidity: merged.humidity,
+          }));
         }
         const overlay = normalizeOverlay(json.operations);
         const snap: LastSimulationSnapshot = {
@@ -414,9 +468,18 @@ export function ProjectWorkspace({
         }, 5000);
         setReplayState("idle");
         setReplayCursor(null);
+        if (autoReplayAfterRunRef.current && overlay.length > 0) {
+          setAutoReplayAfterRun(false);
+          setReplayCursor(0);
+          setReplayFrame([]);
+          setReplayState("playing");
+        } else if (autoReplayAfterRunRef.current) {
+          setAutoReplayAfterRun(false);
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setSimulationRun({ status: "error", error: msg });
+        setAutoReplayAfterRun(false);
       }
     },
     [
@@ -472,6 +535,7 @@ export function ProjectWorkspace({
           title?: string;
           plan?: IgnitionPlan;
           weather?: WeatherValues;
+          workflowMode?: ProjectWorkflowMode;
           ownerSlug?: string;
           lastSimulation?: LastSimulationSnapshot | null;
           agentChatMessages?: unknown;
@@ -486,8 +550,17 @@ export function ProjectWorkspace({
 
         skipSaveAfterLoadRef.current = true;
         if (data.title) setProjectTitle(data.title);
-        if (data.plan) setProjectConfig(ensurePlanBoundary(data.plan));
-        if (data.weather) setWeather({ ...DEFAULT_WEATHER, ...data.weather });
+        if (data.plan) {
+          const loadedPlan = ensurePlanBoundary(data.plan);
+          if (data.weather) {
+            const loadedWeather = { ...DEFAULT_WEATHER, ...data.weather };
+            loadedPlan.windSpeed = loadedWeather.windSpeed;
+            loadedPlan.windDegree = loadedWeather.windDirection;
+            loadedPlan.temperature = loadedWeather.temperature;
+            loadedPlan.humidity = loadedWeather.humidity;
+          }
+          setProjectConfig(loadedPlan);
+        }
         setLastSimulationSnapshot(data.lastSimulation ?? null);
 
         const rawChat = data.agentChatMessages;
@@ -495,6 +568,7 @@ export function ProjectWorkspace({
           ? dedupeMessagesById(rawChat as UIMessage[])
           : [];
         if (!cancelled) {
+          workspaceStore.setMode(data.workflowMode ?? null);
           setAgentChatSnapshot({
             messages: loadedMessages,
             introDone: Boolean(data.agentChatIntroDone),
@@ -508,6 +582,7 @@ export function ProjectWorkspace({
                   weatherOverridesRef.current,
                 )
               : weather,
+            workflowMode: data.workflowMode ?? null,
             lastSimulation: data.lastSimulation ?? null,
             agentChatMessages: loadedMessages,
             agentChatIntroDone: Boolean(data.agentChatIntroDone),
@@ -526,7 +601,7 @@ export function ProjectWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [projectId, userSlug, router]);
+  }, [projectId, userSlug, router, workspaceStore]);
 
   useEffect(() => {
     lastMapPositionNavKeyRef.current = null;
@@ -560,6 +635,7 @@ export function ProjectWorkspace({
       title: projectTitle,
       plan: projectConfig,
       weather,
+      workflowMode,
       lastSimulation: lastSimulationSnapshot,
       agentChatMessages: agentChatSnapshot.messages,
       agentChatIntroDone: agentChatSnapshot.introDone,
@@ -599,6 +675,7 @@ export function ProjectWorkspace({
     weather,
     projectTitle,
     projectId,
+    workflowMode,
     lastSimulationSnapshot,
     agentChatSnapshot,
   ]);
@@ -658,6 +735,16 @@ export function ProjectWorkspace({
   );
 
   const handleSetupUpdate = useCallback((update: SetupUpdate) => {
+    if (update.field === "simulationTimesteps") {
+      const v = Number(update.value);
+      if (Number.isNaN(v)) return;
+      setProjectConfig((prev) => ({
+        ...prev,
+        total_sim_time: clampSimulationTimesteps(v),
+      }));
+      return;
+    }
+
     if (
       update.field === "cellResolution" ||
       update.field === "cellSpaceDimension" ||
@@ -683,24 +770,92 @@ export function ProjectWorkspace({
     };
     const wf = weatherFields[update.field];
     if (wf) {
-      setWeather((prev) => ({ ...prev, [wf]: v }));
+      const nextWeatherOverrides: WeatherOverrideState = { ...weatherOverridesRef.current };
+      nextWeatherOverrides[wf] = v;
+      setWeatherOverrides(nextWeatherOverrides);
+      setProjectConfig((prev) => ({
+        ...prev,
+        windSpeed: wf === "windSpeed" ? v : prev.windSpeed,
+        windDegree: wf === "windDirection" ? v : prev.windDegree,
+        temperature: wf === "temperature" ? v : prev.temperature,
+        humidity: wf === "humidity" ? v : prev.humidity,
+      }));
     }
-  }, []);
+  }, [setProjectConfig]);
+
+  const runSimulationFromTrigger = useCallback(
+    (input: { simulationTimesteps?: number; simulationHours?: number }) => {
+      const requested =
+        typeof input.simulationTimesteps === "number" &&
+        Number.isFinite(input.simulationTimesteps)
+          ? clampSimulationTimesteps(input.simulationTimesteps)
+          : typeof input.simulationHours === "number" &&
+              Number.isFinite(input.simulationHours)
+            ? legacyHoursToTimesteps(input.simulationHours)
+            : DEFAULT_SIMULATION_TIMESTEPS;
+      setProjectConfig((prev) => ({ ...prev, total_sim_time: requested }));
+      void handleStartSimulation(requested);
+    },
+    [handleStartSimulation, setProjectConfig],
+  );
 
   const handleRunTrigger = useCallback(
     (trigger: RunTrigger) => {
       if (trigger.action !== "run-simulation") return;
-      const requested =
-        typeof trigger.simulationTimesteps === "number" &&
-        Number.isFinite(trigger.simulationTimesteps)
-          ? clampSimulationTimesteps(trigger.simulationTimesteps)
-          : typeof trigger.simulationHours === "number" &&
-              Number.isFinite(trigger.simulationHours)
-            ? legacyHoursToTimesteps(trigger.simulationHours)
-            : DEFAULT_SIMULATION_TIMESTEPS;
-      void handleStartSimulation(requested);
+      runSimulationFromTrigger(trigger);
     },
-    [handleStartSimulation],
+    [runSimulationFromTrigger],
+  );
+
+  const handleAgentCommand = useCallback(
+    (command: AgentCommandTrigger) => {
+      if (command.action === "run-simulation") {
+        runSimulationFromTrigger(command);
+        return;
+      }
+
+      if (command.action === "playback-control") {
+        if (command.playbackAction === "pause") {
+          handlePauseReplay();
+          return;
+        }
+
+        if (lastSimulationSnapshot) {
+          if (replayState === "paused") {
+            handleResumeReplay();
+          } else if (replayState !== "playing") {
+            handleReplay();
+          }
+          return;
+        }
+
+        if (simulationRun.status === "running") {
+          setAutoReplayAfterRun(true);
+          toast("Replay queued", {
+            description: "Playback will start automatically when this run completes.",
+          });
+          return;
+        }
+
+        toast("No simulation results yet", {
+          description: "Run a simulation first, then ask me to play it.",
+        });
+        return;
+      }
+
+      if (command.action === "reset-project") {
+        setPendingReset(true);
+      }
+    },
+    [
+      runSimulationFromTrigger,
+      handlePauseReplay,
+      lastSimulationSnapshot,
+      replayState,
+      handleResumeReplay,
+      handleReplay,
+      simulationRun.status,
+    ],
   );
 
   const handleRenameProject = useCallback(
@@ -741,12 +896,19 @@ export function ProjectWorkspace({
       });
       const json = await res.json();
       if (res.ok && json.weather) {
-        setWeather(mergeWeather(json.weather, weatherOverridesRef.current));
+        const merged = mergeWeather(json.weather, weatherOverridesRef.current);
+        setProjectConfig((prev) => ({
+          ...prev,
+          windSpeed: merged.windSpeed,
+          windDegree: merged.windDirection,
+          temperature: merged.temperature,
+          humidity: merged.humidity,
+        }));
       }
     } catch (e) {
       console.error("Auto weather fetch failed", e);
     }
-  }, []);
+  }, [setProjectConfig]);
 
   const promptPopulateWeatherForPlacedBoundary = useCallback(
     async (lat: number, lng: number) => {
@@ -776,7 +938,14 @@ export function ProjectWorkspace({
           action: {
             label: "Yes, populate weather",
             onClick: () => {
-              setWeather(mergeWeather(json.weather as WeatherValues, {}));
+              const nextWeather = mergeWeather(json.weather as WeatherValues, {});
+              setProjectConfig((prev) => ({
+                ...prev,
+                windSpeed: nextWeather.windSpeed,
+                windDegree: nextWeather.windDirection,
+                temperature: nextWeather.temperature,
+                humidity: nextWeather.humidity,
+              }));
               setWeatherOverrides({});
               toast.success(
                 json.placeLabel
@@ -795,42 +964,165 @@ export function ProjectWorkspace({
         toast.error("Could not fetch weather for this location");
       }
     },
-    [],
+    [setProjectConfig],
   );
 
-  const handleActionConfirm = useCallback((payload: ActionPayload) => {
-    if (payload.action === "location") {
-      // When re-setting location, wipe all project data except chat.
-      // Start from a fresh plan, then merge the new location in.
+  const resetScenarioForLocationChange = useCallback(() => {
+    if (readyBadgeTimerRef.current) {
+      clearTimeout(readyBadgeTimerRef.current);
+      readyBadgeTimerRef.current = null;
+    }
+    setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
+    setLastSimulationSnapshot(null);
+    stopReplayAnimation();
+    setReplayFrame(null);
+    setReplayState("idle");
+    setReplayCursor(null);
+    setSimulationRun({ status: "idle", error: null });
+    setAutoReplayAfterRun(false);
+  }, [stopReplayAnimation]);
+
+  const applyLocationChange = useCallback(
+    (
+      payload: {
+        proj_center_lng: number;
+        proj_center_lat: number;
+        boundaryGeoJSON?: BoundaryGeoJSON;
+      },
+      options?: { weatherStrategy?: "fetch" | "prompt" | "none" },
+    ) => {
+      // Keep the same reset semantics as "Set Project Location" in the UI.
       const fresh = defaultIgnitionPlan();
-      // Preserve cell grid settings the user may have configured:
       fresh.cellResolution = projectConfig.cellResolution;
       fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
       fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
-      // Preserve weather:
       fresh.windSpeed = weather.windSpeed;
       fresh.windDegree = weather.windDirection;
       fresh.temperature = weather.temperature;
       fresh.humidity = weather.humidity;
 
-      const merged = mergeActionIntoPlan(fresh, payload);
-      setProjectConfig(merged);
+      const merged = mergeActionIntoPlan(fresh, {
+        action: "location",
+        proj_center_lng: payload.proj_center_lng,
+        proj_center_lat: payload.proj_center_lat,
+        boundaryGeoJSON: payload.boundaryGeoJSON,
+      });
+
+      setProjectConfig(ensurePlanBoundary(merged));
       setLocationSearchPreview(null);
-      // Clear terrain, simulation results, and replay state
-      setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
-      setLastSimulationSnapshot(null);
-      stopReplayAnimation();
-      setReplayFrame(null);
-      setReplayState("idle");
-      setReplayCursor(null);
-      setSimulationRun({ status: "idle", error: null });
-      
-      // Automatic weather fetch for the new project center
-      void fetchWeatherForCoords(payload.proj_center_lat, payload.proj_center_lng);
-    } else {
-      setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
-    }
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, fetchWeatherForCoords]);
+      resetScenarioForLocationChange();
+
+      const weatherStrategy = options?.weatherStrategy ?? "none";
+      if (weatherStrategy === "fetch") {
+        void fetchWeatherForCoords(payload.proj_center_lat, payload.proj_center_lng);
+      } else if (weatherStrategy === "prompt") {
+        void promptPopulateWeatherForPlacedBoundary(
+          payload.proj_center_lat,
+          payload.proj_center_lng,
+        );
+      }
+    },
+    [
+      projectConfig.cellResolution,
+      projectConfig.cellSpaceDimension,
+      projectConfig.cellSpaceDimensionLat,
+      weather,
+      setProjectConfig,
+      resetScenarioForLocationChange,
+      fetchWeatherForCoords,
+      promptPopulateWeatherForPlacedBoundary,
+    ],
+  );
+
+  const handleActionConfirm = useCallback(
+    (payload: ActionPayload) => {
+      if (payload.action === "location") {
+        applyLocationChange(payload, { weatherStrategy: "fetch" });
+      } else {
+        setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
+      }
+    },
+    [applyLocationChange, setProjectConfig],
+  );
+
+  const handleUpdatePlanPatch = useCallback(
+    (patch: IgnitionPlanLoosePatch) => {
+      const centerLatPatch =
+        typeof patch.proj_center_lat === "number" &&
+        Number.isFinite(patch.proj_center_lat)
+          ? patch.proj_center_lat
+          : undefined;
+      const centerLngPatch =
+        typeof patch.proj_center_lng === "number" &&
+        Number.isFinite(patch.proj_center_lng)
+          ? patch.proj_center_lng
+          : undefined;
+      const hasCenterPatch =
+        centerLatPatch !== undefined || centerLngPatch !== undefined;
+      const hasWeatherPatch =
+        typeof patch.windSpeed === "number" ||
+        typeof patch.windDegree === "number" ||
+        typeof patch.temperature === "number" ||
+        typeof patch.humidity === "number";
+
+      if (hasCenterPatch) {
+        const nextLat = centerLatPatch ?? projectConfig.proj_center_lat;
+        const nextLng = centerLngPatch ?? projectConfig.proj_center_lng;
+        if (Number.isFinite(nextLat) && Number.isFinite(nextLng)) {
+          const boundary =
+            patch.boundaryGeoJSON !== undefined
+              ? (patch.boundaryGeoJSON as BoundaryGeoJSON)
+              : undefined;
+          applyLocationChange(
+            {
+              proj_center_lat: nextLat,
+              proj_center_lng: nextLng,
+              boundaryGeoJSON: boundary,
+            },
+            {
+              weatherStrategy: hasWeatherPatch ? "none" : "fetch",
+            },
+          );
+        }
+      }
+
+      const residualPatch: IgnitionPlanLoosePatch = { ...patch };
+      if (hasCenterPatch) {
+        delete residualPatch.proj_center_lat;
+        delete residualPatch.proj_center_lng;
+        delete residualPatch.boundaryGeoJSON;
+      }
+
+      if (Object.keys(residualPatch).length > 0) {
+        workspaceStore.applyLoosePlanPatch(residualPatch);
+      }
+
+      // Fallback guard: if center coordinates are set but boundary is absent, synthesize one.
+      const current = workspaceStore.getState().plan;
+      const hasLocationCenter =
+        Number.isFinite(current.proj_center_lat) &&
+        Number.isFinite(current.proj_center_lng) &&
+        !(current.proj_center_lat === 0 && current.proj_center_lng === 0);
+      if (hasLocationCenter && !current.boundaryGeoJSON) {
+        workspaceStore.replacePlan((prev) => ensurePlanBoundary(prev));
+      }
+
+      const weatherPatch: WeatherOverrideState = {};
+      if (typeof patch.windSpeed === "number") weatherPatch.windSpeed = patch.windSpeed;
+      if (typeof patch.windDegree === "number") weatherPatch.windDirection = patch.windDegree;
+      if (typeof patch.temperature === "number") weatherPatch.temperature = patch.temperature;
+      if (typeof patch.humidity === "number") weatherPatch.humidity = patch.humidity;
+      if (Object.keys(weatherPatch).length > 0) {
+        setWeatherOverrides((prev) => ({ ...prev, ...weatherPatch }));
+      }
+    },
+    [
+      applyLocationChange,
+      projectConfig.proj_center_lat,
+      projectConfig.proj_center_lng,
+      workspaceStore,
+    ],
+  );
 
   const handleSegmentEdit = useCallback((edit: SegmentEdit) => {
     setProjectConfig((prev) => applySegmentEdit(prev, edit));
@@ -896,17 +1188,21 @@ export function ProjectWorkspace({
     setReplayFrame(null);
     setReplayState("idle");
     setReplayCursor(null);
+    if (readyBadgeTimerRef.current) {
+      clearTimeout(readyBadgeTimerRef.current);
+      readyBadgeTimerRef.current = null;
+    }
     skipSaveAfterLoadRef.current = false;
     setProjectTitle(nextTitle);
     setInteractionHint(null);
     setProjectConfig(plan);
-    setWeather({ ...DEFAULT_WEATHER });
     setWeatherOverrides({});
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
     setDrawnShapes([]);
     setLastSimulationSnapshot(null);
     setLocationSearchPreview(null);
     setSimulationRun({ status: "idle", error: null });
+    setAutoReplayAfterRun(false);
     setMapInteractionMode(null);
     pendingActionRef.current = null;
     pendingPolygonRef.current = [];
@@ -919,6 +1215,7 @@ export function ProjectWorkspace({
       title: nextTitle,
       plan,
       weather: DEFAULT_WEATHER,
+      workflowMode,
       lastSimulation: null,
       agentChatMessages: [],
       agentChatIntroDone: nextIntroDone,
@@ -942,7 +1239,7 @@ export function ProjectWorkspace({
     setSaveStatus("saved");
     if (savedClearRef.current) clearTimeout(savedClearRef.current);
     savedClearRef.current = setTimeout(() => setSaveStatus("idle"), 2200);
-  }, [projectId, agentChatSnapshot, stopReplayAnimation]);
+  }, [projectId, agentChatSnapshot, stopReplayAnimation, workflowMode, setProjectConfig]);
 
   useEffect(() => {
     if (!mapInteractionMode) setInteractionHint(null);
@@ -1086,34 +1383,17 @@ export function ProjectWorkspace({
           [minLng, minLat],
         ]],
       };
-      const payload: ActionPayload = {
-        action: "location",
-        proj_center_lng: centerLng,
-        proj_center_lat: centerLat,
-        boundaryGeoJSON,
-      };
-      // Wipe all scenario data (same as handleActionConfirm for location)
-      const fresh = defaultIgnitionPlan();
-      fresh.cellResolution = projectConfig.cellResolution;
-      fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
-      fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
-      fresh.windSpeed = weather.windSpeed;
-      fresh.windDegree = weather.windDirection;
-      fresh.temperature = weather.temperature;
-      fresh.humidity = weather.humidity;
-      setProjectConfig(mergeActionIntoPlan(fresh, payload));
-      setLocationSearchPreview(null);
-      setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
-      setLastSimulationSnapshot(null);
-      stopReplayAnimation();
-      setReplayFrame(null);
-      setReplayState("idle");
-      setReplayCursor(null);
-      setSimulationRun({ status: "idle", error: null });
-      void promptPopulateWeatherForPlacedBoundary(centerLat, centerLng);
+      applyLocationChange(
+        {
+          proj_center_lng: centerLng,
+          proj_center_lat: centerLat,
+          boundaryGeoJSON,
+        },
+        { weatherStrategy: "prompt" },
+      );
     }
     setMapInteractionMode(null);
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation, pushInteractionHint, promptPopulateWeatherForPlacedBoundary]);
+  }, [applyLocationChange, pushInteractionHint]);
 
   const handlePolyline = useCallback((nodes: import("leaflet").LatLng[]) => {
     const action = pendingActionRef.current;
@@ -1182,32 +1462,13 @@ export function ProjectWorkspace({
       type: "Polygon",
       coordinates: [ring],
     };
-    const payload: ActionPayload = {
-      action: "location",
+    applyLocationChange({
       proj_center_lng: avgLng,
       proj_center_lat: avgLat,
       boundaryGeoJSON,
-    };
-    // Wipe all scenario data (same as handleRect / handleActionConfirm for location)
-    const fresh = defaultIgnitionPlan();
-    fresh.cellResolution = projectConfig.cellResolution;
-    fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
-    fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
-    fresh.windSpeed = weather.windSpeed;
-    fresh.windDegree = weather.windDirection;
-    fresh.temperature = weather.temperature;
-    fresh.humidity = weather.humidity;
-    setProjectConfig(mergeActionIntoPlan(fresh, payload));
-    setLocationSearchPreview(null);
-    setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
-    setLastSimulationSnapshot(null);
-    stopReplayAnimation();
-    setReplayFrame(null);
-    setReplayState("idle");
-    setReplayCursor(null);
-    setSimulationRun({ status: "idle", error: null });
+    });
     setMapInteractionMode(null);
-  }, [projectConfig.cellResolution, projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat, weather, stopReplayAnimation]);
+  }, [applyLocationChange]);
 
   const handleRequestMapInteraction = useCallback(
     (mode: MapInteractionMode, action?: "location" | "fuel-break" | "point-ignition" | "line-ignition") => {
@@ -1244,21 +1505,6 @@ export function ProjectWorkspace({
     },
     [locationSearchPreview, projectConfig.cellSpaceDimension, projectConfig.cellResolution],
   );
-
-  useEffect(() => {
-    setProjectConfig((p) => ({
-      ...p,
-      windSpeed: weather.windSpeed,
-      windDegree: weather.windDirection,
-      temperature: weather.temperature,
-      humidity: weather.humidity,
-    }));
-  }, [
-    weather.windSpeed,
-    weather.windDirection,
-    weather.temperature,
-    weather.humidity,
-  ]);
 
   if (!hydrated) {
     return (
@@ -1318,6 +1564,8 @@ export function ProjectWorkspace({
     <ProjectAgentChatHost
       key={`${projectId}-${chatMountKey}`}
       projectId={projectId}
+      mode={workflowMode}
+      planSnapshot={projectConfig}
       initialMessages={agentChatSnapshot.messages}
       introDoneServer={agentChatSnapshot.introDone}
       onPersist={handleAgentChatPersist}
@@ -1344,9 +1592,7 @@ export function ProjectWorkspace({
         handleActionConfirm(payload);
         setActiveWorkspaceAction(null);
       }}
-      onRequestMapDraw={(mode) => {
-        const action =
-          activeWorkspaceAction === "fuel-break" ? "fuel-break" : "location";
+      onRequestMapDraw={(mode, action) => {
         setActiveWorkspaceAction(null);
         setLocationSearchPreview(null);
         handleRequestMapInteraction(mode, action);
@@ -1370,6 +1616,18 @@ export function ProjectWorkspace({
       className="h-screen min-h-0 w-full flex-col overflow-hidden bg-background text-foreground"
     >
     <main className="relative flex h-full overflow-hidden bg-background text-foreground">
+      {workflowMode === null && (
+        <WorkflowModeBanner
+          onGuideMeViaChat={() => {
+            workspaceStore.setMode("chat");
+            if (showStarterPrompt) {
+              void sendStarterPrompt();
+            }
+          }}
+          onManualMode={() => workspaceStore.setMode("manual")}
+          onDismiss={() => workspaceStore.setMode("manual")}
+        />
+      )}
       <div
         className="pointer-events-none absolute top-3 z-40 transition-[left] duration-200 ease-linear"
         style={{
@@ -1393,19 +1651,44 @@ export function ProjectWorkspace({
             setProjectConfig((prev) => ({ ...prev, [field]: value }));
           }}
           onWeatherOverride={(field, value) => {
-            setWeather((prev) => ({ ...prev, [field]: value }));
             setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+            setProjectConfig((prev) => ({
+              ...prev,
+              windSpeed: field === "windSpeed" ? value : prev.windSpeed,
+              windDegree: field === "windDirection" ? value : prev.windDegree,
+              temperature: field === "temperature" ? value : prev.temperature,
+              humidity: field === "humidity" ? value : prev.humidity,
+            }));
           }}
           onWeatherFetched={(next) => {
-            setWeather(mergeWeather(next, weatherOverridesRef.current));
+            const merged = mergeWeather(next, weatherOverridesRef.current);
+            setProjectConfig((prev) => ({
+              ...prev,
+              windSpeed: merged.windSpeed,
+              windDegree: merged.windDirection,
+              temperature: merged.temperature,
+              humidity: merged.humidity,
+            }));
           }}
           onWeatherFetchedAtCoords={(next, coords, label) => {
-            setWeather(mergeWeather(next, weatherOverridesRef.current));
+            const merged = mergeWeather(next, weatherOverridesRef.current);
+            setProjectConfig((prev) => ({
+              ...prev,
+              windSpeed: merged.windSpeed,
+              windDegree: merged.windDirection,
+              temperature: merged.temperature,
+              humidity: merged.humidity,
+            }));
           }}
           onOpenActionModal={setActiveWorkspaceAction}
           onRequestMapInteraction={handleRequestMapInteraction}
-          simulationTimesteps={simulationTimesteps}
-          onSimulationTimestepsChange={setSimulationTimesteps}
+          simulationTimesteps={clampSimulationTimesteps(projectConfig.total_sim_time)}
+          onSimulationTimestepsChange={(value) =>
+            setProjectConfig((prev) => ({
+              ...prev,
+              total_sim_time: clampSimulationTimesteps(value),
+            }))
+          }
           onStartSimulation={(timesteps) => {
             void handleStartSimulation(timesteps);
           }}
@@ -1494,8 +1777,14 @@ export function ProjectWorkspace({
             terrainState={terrainState}
             onTerrainChange={handleTerrainChange}
             onWeatherOverride={(field, value) => {
-              setWeather((prev) => ({ ...prev, [field]: value }));
               setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+              setProjectConfig((prev) => ({
+                ...prev,
+                windSpeed: field === "windSpeed" ? value : prev.windSpeed,
+                windDegree: field === "windDirection" ? value : prev.windDegree,
+                temperature: field === "temperature" ? value : prev.temperature,
+                humidity: field === "humidity" ? value : prev.humidity,
+              }));
             }}
           />
 
@@ -1513,7 +1802,9 @@ export function ProjectWorkspace({
               status={status}
               sendMessage={sendMessage}
               onSetupUpdate={handleSetupUpdate}
+              onUpdatePlanPatch={handleUpdatePlanPatch}
               onRunTrigger={handleRunTrigger}
+              onAgentCommand={handleAgentCommand}
               showStarterPrompt={showStarterPrompt}
               starterPromptText={starterPromptText}
               onSendStarterPrompt={sendStarterPrompt}
@@ -1537,8 +1828,13 @@ export function ProjectWorkspace({
         }}
         onResetRequest={() => setPendingReset(true)}
         simulationRunning={simulationRun.status === "running"}
-        simulationTimesteps={simulationTimesteps}
-        onSimulationTimestepsChange={setSimulationTimesteps}
+        simulationTimesteps={clampSimulationTimesteps(projectConfig.total_sim_time)}
+        onSimulationTimestepsChange={(value) =>
+          setProjectConfig((prev) => ({
+            ...prev,
+            total_sim_time: clampSimulationTimesteps(value),
+          }))
+        }
         playbackRate={playbackRate}
         onPlaybackRateChange={setPlaybackRate}
         replayState={replayState}
@@ -1553,8 +1849,14 @@ export function ProjectWorkspace({
         }}
         onReplayPause={handlePauseReplay}
         onWeatherOverride={(field, value) => {
-          setWeather((prev) => ({ ...prev, [field]: value }));
           setWeatherOverrides((prev) => ({ ...prev, [field]: value }));
+          setProjectConfig((prev) => ({
+            ...prev,
+            windSpeed: field === "windSpeed" ? value : prev.windSpeed,
+            windDegree: field === "windDirection" ? value : prev.windDegree,
+            temperature: field === "temperature" ? value : prev.temperature,
+            humidity: field === "humidity" ? value : prev.humidity,
+          }));
         }}
       />
     </main>

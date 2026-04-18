@@ -6,6 +6,7 @@ import type { UIMessage } from "ai";
 import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { IgnitionPlanLoosePatch } from "@/stores/projectWorkspaceStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,20 @@ export type RunTrigger = {
   simulationHours?: number;
 };
 
+export type PlaybackControlTrigger = {
+  action: "playback-control";
+  playbackAction: "play" | "pause";
+};
+
+export type ResetProjectTrigger = {
+  action: "reset-project";
+};
+
+export type AgentCommandTrigger =
+  | RunTrigger
+  | PlaybackControlTrigger
+  | ResetProjectTrigger;
+
 type CedarCaptionChatProps = {
   dimensions?: { width?: number; maxWidth?: number };
   className?: string;
@@ -35,7 +50,9 @@ type CedarCaptionChatProps = {
       | { parts: Array<{ type: "text"; text: string }>; messageId?: string },
   ) => Promise<void>;
   onSetupUpdate?: (update: SetupUpdate) => void;
+  onUpdatePlanPatch?: (patch: IgnitionPlanLoosePatch) => void;
   onRunTrigger?: (trigger: RunTrigger) => void;
+  onAgentCommand?: (command: AgentCommandTrigger) => void;
   showStarterPrompt?: boolean;
   starterPromptText?: string;
   onSendStarterPrompt?: () => Promise<void>;
@@ -92,6 +109,108 @@ function parseMessageContent(raw: string): {
   return { displayText, updates, runTriggers };
 }
 
+function extractUpdatePlanPatches(message: UIMessage): Array<{
+  key: string;
+  patch: IgnitionPlanLoosePatch;
+}> {
+  const patches: Array<{ key: string; patch: IgnitionPlanLoosePatch }> = [];
+
+  for (const part of message.parts as Array<Record<string, unknown>>) {
+    if (!part || typeof part.type !== "string") continue;
+
+    const isNamedTool =
+      part.type.startsWith("tool-") && part.type === "tool-update-plan";
+    const isDynamicTool =
+      part.type === "dynamic-tool" && part.toolName === "update-plan";
+
+    if (!isNamedTool && !isDynamicTool) continue;
+    if (part.state !== "output-available") continue;
+
+    const toolCallId =
+      typeof part.toolCallId === "string" ? part.toolCallId : message.id;
+    const output = part.output;
+    if (!output || typeof output !== "object") continue;
+
+    const candidate = (output as { patch?: unknown }).patch ?? output;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+
+    patches.push({
+      key: `${message.id}:${toolCallId}`,
+      patch: candidate as IgnitionPlanLoosePatch,
+    });
+  }
+
+  return patches;
+}
+
+function partMatchesTool(
+  part: Record<string, unknown>,
+  toolName: string,
+): boolean {
+  if (typeof part.type !== "string") return false;
+  const isNamedTool = part.type === `tool-${toolName}`;
+  const isDynamicTool =
+    part.type === "dynamic-tool" && part.toolName === toolName;
+  return isNamedTool || isDynamicTool;
+}
+
+function extractAgentCommandTriggers(message: UIMessage): Array<{
+  key: string;
+  command: AgentCommandTrigger;
+}> {
+  const commands: Array<{ key: string; command: AgentCommandTrigger }> = [];
+
+  for (const part of message.parts as Array<Record<string, unknown>>) {
+    if (!part || part.state !== "output-available") continue;
+
+    const toolCallId =
+      typeof part.toolCallId === "string" ? part.toolCallId : message.id;
+    const output = part.output;
+    if (!output || typeof output !== "object" || Array.isArray(output)) continue;
+    const payload = output as Record<string, unknown>;
+
+    if (partMatchesTool(part, "run-simulation")) {
+      const rawTimesteps = payload.simulationTimesteps;
+      const simulationTimesteps =
+        typeof rawTimesteps === "number" && Number.isFinite(rawTimesteps)
+          ? rawTimesteps
+          : undefined;
+      commands.push({
+        key: `${message.id}:${toolCallId}:run`,
+        command: {
+          action: "run-simulation",
+          ...(simulationTimesteps !== undefined ? { simulationTimesteps } : {}),
+        },
+      });
+      continue;
+    }
+
+    if (partMatchesTool(part, "playback-control")) {
+      const playbackAction = payload.playbackAction;
+      if (playbackAction !== "play" && playbackAction !== "pause") continue;
+      commands.push({
+        key: `${message.id}:${toolCallId}:playback`,
+        command: {
+          action: "playback-control",
+          playbackAction,
+        },
+      });
+      continue;
+    }
+
+    if (partMatchesTool(part, "reset-project")) {
+      commands.push({
+        key: `${message.id}:${toolCallId}:reset`,
+        command: { action: "reset-project" },
+      });
+    }
+  }
+
+  return commands;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CedarCaptionChat({
@@ -103,7 +222,9 @@ export function CedarCaptionChat({
   status,
   sendMessage,
   onSetupUpdate,
+  onUpdatePlanPatch,
   onRunTrigger,
+  onAgentCommand,
   showStarterPrompt = false,
   starterPromptText,
   onSendStarterPrompt,
@@ -114,6 +235,8 @@ export function CedarCaptionChat({
   const [starterBusy, setStarterBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const processedIds = useRef<Set<string>>(new Set());
+  const processedToolPatches = useRef<Set<string>>(new Set());
+  const processedToolCommands = useRef<Set<string>>(new Set());
   const isBusy = status === "submitted" || status === "streaming";
 
   // Auto-scroll
@@ -139,6 +262,34 @@ export function CedarCaptionChat({
       }
     }
   }, [messages, status, onSetupUpdate, onRunTrigger]);
+
+  useEffect(() => {
+    if (!onUpdatePlanPatch) return;
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      const patches = extractUpdatePlanPatches(msg);
+      for (const { key, patch } of patches) {
+        if (processedToolPatches.current.has(key)) continue;
+        processedToolPatches.current.add(key);
+        onUpdatePlanPatch(patch);
+      }
+    }
+  }, [messages, onUpdatePlanPatch]);
+
+  useEffect(() => {
+    if (!onAgentCommand) return;
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue;
+      const commands = extractAgentCommandTriggers(msg);
+      for (const { key, command } of commands) {
+        if (processedToolCommands.current.has(key)) continue;
+        processedToolCommands.current.add(key);
+        onAgentCommand(command);
+      }
+    }
+  }, [messages, onAgentCommand]);
 
   async function submitPrompt(prompt: string) {
     const value = prompt.trim();
