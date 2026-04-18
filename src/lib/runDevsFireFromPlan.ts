@@ -74,18 +74,20 @@ export function planSegmentToDynamicIgnition(seg: {
   end_x: number;
   end_y: number;
 }) {
+  // DEVS-FIRE setDynamicIgnition expects x=row and y=column.
+  // IgnitionPlan stores x=column and y=row.
   return {
-    x1: seg.start_x,
-    y1: seg.start_y,
-    x2: seg.end_x,
-    y2: seg.end_y,
+    x1: seg.start_y,
+    y1: seg.start_x,
+    x2: seg.end_y,
+    y2: seg.end_x,
   };
 }
 
 
 function mapIgnitionMode(mode: string): string {
   const m = mode.toLowerCase();
-  if (m.includes("point") || m.includes("static") || m.includes("spot")) return "spot";
+  if (m.includes("point") || m.includes("spot")) return "spot";
   return "continuous";
 }
 
@@ -248,11 +250,12 @@ export async function executeDevsFireSimulation(
       } else {
         const i1 = dynamicPathIndex * 2 + 1; // x1, x3, x5...
         const i2 = dynamicPathIndex * 2 + 2; // x2, x4, x6...
+        const mapped = planSegmentToDynamicIgnition(seg);
         const dynParams: Record<string, number> = {
-          [`x${i1}`]: seg.start_x,
-          [`y${i1}`]: seg.start_y,
-          [`x${i2}`]: seg.end_x,
-          [`y${i2}`]: seg.end_y,
+          [`x${i1}`]: mapped.x1,
+          [`y${i1}`]: mapped.y1,
+          [`x${i2}`]: mapped.x2,
+          [`y${i2}`]: mapped.y2,
         };
         
         await devsFirePost("/setDynamicIgnition/", userToken, {

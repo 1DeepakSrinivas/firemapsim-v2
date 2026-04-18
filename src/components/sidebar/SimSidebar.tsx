@@ -29,6 +29,15 @@ import {
 } from "@/lib/plan-steps";
 import { cn } from "@/lib/utils";
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,11 +95,11 @@ function Drawer({
 }) {
   return (
     <div className="border-b border-white/6 last:border-b-0">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => onToggle(id)}
         className={cn(
-          "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
+          "h-auto w-full justify-start gap-2.5 rounded-none px-3 py-2.5 text-left transition-colors",
           open ? "text-white" : "text-white/50 hover:text-white/80",
         )}
       >
@@ -103,7 +112,7 @@ function Drawer({
             open && "rotate-90",
           )}
         />
-      </button>
+      </Button>
 
       <AnimatePresence initial={false}>
         {open && (
@@ -154,7 +163,7 @@ function InlineEdit({
     <div className="flex items-center justify-between py-1.5">
       <span className="text-[11px] text-white/40">{label}</span>
       {editing ? (
-        <input
+        <Input
           ref={ref}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -163,17 +172,18 @@ function InlineEdit({
             if (e.key === "Enter") commit();
             if (e.key === "Escape") { setDraft(String(value)); setEditing(false); }
           }}
-          className="w-20 rounded border border-white/15 bg-white/8 px-2 py-0.5 text-right text-[11px] text-white outline-none focus:border-orange-400/50"
+          className="h-auto w-20 border-white/15 bg-white/8 px-2 py-0.5 text-right text-[11px] text-white focus-visible:ring-orange-400/50"
         />
       ) : (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => { setDraft(String(value)); setEditing(true); }}
-          className="group flex items-center gap-1 text-[11px] text-white/70 hover:text-white"
+          className="group h-auto gap-1 px-0 text-[11px] text-white/70 hover:bg-transparent hover:text-white"
         >
           {value}{suffix ? ` ${suffix}` : ""}
           <span className="text-[9px] text-white/20 group-hover:text-white/40">✎</span>
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -201,18 +211,18 @@ function ActionButton({
   }[variant];
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40",
+        "h-auto w-full justify-start gap-2 rounded-lg px-3 py-2 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40",
         cls,
       )}
     >
       <Icon className="h-3 w-3 shrink-0" />
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -247,29 +257,33 @@ function ScenarioSetup({
           Weather Fetch
         </p>
         <div className="space-y-2">
-          <input
+          <Input
             value={zipCode}
             onChange={(e) => setZipCode(e.target.value)}
             placeholder="Enter zip code"
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-white placeholder:text-white/25 outline-none focus:border-white/20"
+            className="h-auto w-full border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-white/20"
           />
           <div className="flex gap-1.5">
-            <select
+            <Select
               value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-              className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-white/20"
+              onValueChange={setTimeframe}
             >
-              <option value="current">Current</option>
-              <option value="forecast">Forecast</option>
-              <option value="historical">Historical</option>
-            </select>
-            <button
-              type="button"
+              <SelectTrigger className="h-auto flex-1 border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-white/70">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="current">Current</SelectItem>
+                <SelectItem value="forecast">Forecast</SelectItem>
+                <SelectItem value="historical">Historical</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
               disabled={!zipCode.trim()}
-              className="rounded-lg bg-orange-500/20 px-3 py-1.5 text-[11px] font-medium text-orange-400 transition hover:bg-orange-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-auto rounded-lg bg-orange-500/20 px-3 py-1.5 text-[11px] font-medium text-orange-400 hover:bg-orange-500/30"
             >
               Fetch
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -384,21 +398,23 @@ function RunConfig({
       <div className="flex items-center justify-between py-1">
         <span className="text-[11px] text-white/40">Simulation hours</span>
         <div className="flex items-center gap-1.5">
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="icon"
             onClick={() => setHours((h) => Math.max(1, h - 1))}
-            className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+            className="size-5 border-white/10 p-0 text-white/50 hover:border-white/20 hover:text-white/80"
           >
             <Minus className="h-2.5 w-2.5" />
-          </button>
+          </Button>
           <span className="w-8 text-center text-[11px] font-semibold text-white/80">{hours}h</span>
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="icon"
             onClick={() => setHours((h) => Math.min(72, h + 1))}
-            className="flex h-5 w-5 items-center justify-center rounded border border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+            className="size-5 border-white/10 p-0 text-white/50 hover:border-white/20 hover:text-white/80"
           >
             +
-          </button>
+          </Button>
         </div>
       </div>
 

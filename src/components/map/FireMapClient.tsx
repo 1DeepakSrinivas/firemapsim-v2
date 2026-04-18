@@ -57,6 +57,12 @@ const TILE_LAYERS: Record<MapStyleId, { url: string; attribution: string }> = {
   },
 };
 
+const SATELLITE_LABELS_LAYER = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  attribution:
+    "Labels &copy; Esri &mdash; Source: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), NOSTRA, and OpenStreetMap contributors",
+};
+
 export type FireMapClientProps = {
   onBoundsChange?: (payload: BoundsChangePayload) => void;
   onMapReady?: (map: import("leaflet").Map) => void;
@@ -547,6 +553,13 @@ export default function FireMapClient({
         className="h-full w-full"
       >
         <TileLayer key={mapStyle} url={tile.url} attribution={tile.attribution} />
+        {mapStyle === "satellite" && (
+          <TileLayer
+            key="satellite-labels"
+            url={SATELLITE_LABELS_LAYER.url}
+            attribution={SATELLITE_LABELS_LAYER.attribution}
+          />
+        )}
 
         <MapEventsBridge onBoundsChange={onBoundsChange} onMapReady={onMapReady} />
         {boundaryGeoJSON && <BoundaryLayer geojson={boundaryGeoJSON} />}

@@ -3,15 +3,25 @@
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
-import { AnimatePresence, motion } from "motion/react";
-import { Minus, PenLine, RectangleHorizontal, X } from "lucide-react";
+import { MapPin, Minus, PenLine, RectangleHorizontal, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Loader2, Search } from "lucide-react";
 import type { MapInteractionMode } from "./MapInteractionLayer";
 
 import { cn } from "@/lib/utils";
 import type { ActionPayload, BoundaryGeoJSON } from "@/types/ignitionPlan";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // ─── Action IDs & configs ─────────────────────────────────────────────────────
 
@@ -46,14 +56,16 @@ export const ACTION_MODAL_CONFIGS: Record<ActionId, ActionModalConfig> = {
   "point-ignition": {
     id: "point-ignition",
     title: "Define Point Ignition",
-    agentSeed: "", // not used — goes straight to map
-    fields: [],    // not used
+    agentSeed:
+      "Help me define a point ignition in grid coordinates (x, y). When ready, output ```action-result``` JSON with action \"point-ignition\" and a points array containing objects with x, y, speed (m/s), and mode fields.",
+    fields: [],
   },
   "line-ignition": {
     id: "line-ignition",
     title: "Define Line Ignition",
-    agentSeed: "", // not used — goes straight to map
-    fields: [],    // not used
+    agentSeed:
+      "Help me define a line ignition from (start_x, start_y) to (end_x, end_y) in grid coordinates. When ready, output ```action-result``` JSON with action \"line-ignition\" and numeric fields start_x, start_y, end_x, end_y, plus optional speed and mode.",
+    fields: [],
   },
   "fuel-break": {
     id: "fuel-break",
@@ -317,14 +329,14 @@ function ManualTab({
         <label key={f.key} className="block">
           <span className="mb-1 block text-[10px] font-medium text-white/45">{f.label}</span>
           <div className="flex items-center gap-1">
-            <input
+            <Input
               type={f.type === "number" ? "number" : "text"}
               value={initialValues[f.key] ?? ""}
               placeholder={f.placeholder}
               onChange={(e) =>
                 onValuesChange({ ...initialValues, [f.key]: e.target.value })
               }
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 outline-none focus:border-orange-400/40"
+              className="h-auto w-full rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-orange-400/40"
             />
             {f.suffix ? (
               <span className="shrink-0 text-[10px] text-white/30">{f.suffix}</span>
@@ -448,20 +460,19 @@ function AgentInputBar({
         await onSend(t);
       }}
     >
-      <input
+      <Input
         value={input}
         onChange={(e) => setInput(e.target.value)}
         placeholder="Message the agent…"
         disabled={disabled}
-        className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 outline-none focus:border-white/25 disabled:opacity-50"
+        className="h-auto flex-1 rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-white/25 disabled:opacity-50"
       />
-      <button
-        type="submit"
+      <Button
         disabled={disabled || !input.trim()}
-        className="shrink-0 rounded-lg bg-orange-500/30 px-3 py-1.5 text-[11px] font-medium text-orange-200 transition hover:bg-orange-500/40 disabled:opacity-40"
+        className="h-auto shrink-0 rounded-lg bg-orange-500/30 px-3 py-1.5 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
       >
         Send
-      </button>
+      </Button>
     </form>
   );
 }
@@ -562,21 +573,21 @@ function DrawModeButton({
   const border = color === "sky" ? "hover:border-sky-500/30 hover:bg-sky-500/8" : "hover:border-orange-500/30 hover:bg-orange-500/8";
   const iconColor = color === "sky" ? "text-sky-400/70" : "text-orange-400/70";
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-left transition ${border}`}
+      className={`h-auto w-full justify-start gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-left transition ${border}`}
     >
       <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} />
       <div>
         <p className="text-[11px] font-medium text-white/80">{label}</p>
         <p className="text-[10px] text-white/35">{description}</p>
       </div>
-    </button>
+    </Button>
   );
 }
 
-function LocationModal({
+function LocationModalBody({
   onClose,
   onLocationPreview,
   onRequestMapDraw,
@@ -631,138 +642,169 @@ function LocationModal({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ duration: 0.15 }}
-      className="flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141414] shadow-2xl"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <h2 className="text-sm font-semibold text-white/90">Set Project Location</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md p-1 text-white/40 transition hover:bg-white/10 hover:text-white/80"
-          aria-label="Close"
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30">
+          Search by address or zip code
+        </p>
+        <form
+          className="flex gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleSearch();
+          }}
         >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="space-y-4 p-4">
-        {/* Address / zip search */}
-        <div className="space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30">
-            Search by address or zip code
-          </p>
-          <form
-            className="flex gap-1.5"
-            onSubmit={(e) => { e.preventDefault(); void handleSearch(); }}
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30" />
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setResult(null);
+                setError(null);
+                onLocationPreview?.(null);
+              }}
+              placeholder="e.g. 94102  or  123 Main St, Oakland CA"
+              className="h-auto w-full rounded-lg border-white/10 bg-white/5 py-2 pl-8 pr-3 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-orange-400/40"
+            />
+          </div>
+          <Button
+            disabled={!query.trim() || loading}
+            className="h-auto gap-1 rounded-lg bg-orange-500/25 px-3 py-2 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
           >
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30" />
-              <input
-                ref={inputRef}
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setResult(null);
-                  setError(null);
-                  onLocationPreview?.(null);
-                }}
-                placeholder="e.g. 94102  or  123 Main St, Oakland CA"
-                className="w-full rounded-lg border border-white/10 bg-white/5 py-2 pl-8 pr-3 text-[11px] text-white placeholder:text-white/25 outline-none focus:border-orange-400/40"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={!query.trim() || loading}
-              className="flex items-center gap-1 rounded-lg bg-orange-500/25 px-3 py-2 text-[11px] font-medium text-orange-200 transition hover:bg-orange-500/40 disabled:opacity-40"
-            >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Search"}
-            </button>
-          </form>
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Search"}
+          </Button>
+        </form>
 
-          {error ? (
-            <p className="text-[10px] text-red-400">{error}</p>
-          ) : null}
+        {error ? <p className="text-[10px] text-red-400">{error}</p> : null}
 
-          {result ? (
-            <div className="space-y-2">
-              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
-                <p className="text-[10px] font-semibold text-emerald-400">Found</p>
-                <p className="mt-0.5 text-[11px] leading-snug text-white/70">{result.displayName}</p>
-                <p className="mt-1 text-[10px] text-white/35">
-                  {result.lat.toFixed(5)}, {result.lng.toFixed(5)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const payload: ActionPayload = {
-                    action: "location",
-                    proj_center_lng: result.lng,
-                    proj_center_lat: result.lat,
-                    // Pass through current grid settings so boundary is auto-sized
-                    ...(currentPlan ? {
-                      cellResolution: currentPlan.cellResolution,
-                      cellSpaceDimension: currentPlan.cellSpaceDimension,
-                      cellSpaceDimensionLat: currentPlan.cellSpaceDimensionLat,
-                    } : {}),
-                  };
-                  onConfirm?.(payload);
-                  onClose();
-                }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-orange-500/25 px-4 py-2 text-[11px] font-medium text-orange-200 transition hover:bg-orange-500/40"
-              >
-                Set as project location
-              </button>
-              <p className="text-[10px] leading-snug text-white/35">
-                This places a {currentPlan?.cellSpaceDimension ?? 200}×{currentPlan?.cellSpaceDimension ?? 200}-cell grid square ({((((currentPlan?.cellSpaceDimension ?? 200) * (currentPlan?.cellResolution ?? 30)) / 1000)).toFixed(1)} km) centered on the result. Or place it manually on the map below.
+        {result ? (
+          <div className="space-y-2">
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
+              <p className="text-[10px] font-semibold text-emerald-400">Found</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-white/70">{result.displayName}</p>
+              <p className="mt-1 text-[10px] text-white/35">
+                {result.lat.toFixed(5)}, {result.lng.toFixed(5)}
               </p>
             </div>
-          ) : null}
-        </div>
-
-        {/* Divider */}
-        <div className="flex items-center gap-2">
-          <div className="h-px flex-1 bg-white/8" />
-          <span className="text-[9px] uppercase tracking-wider text-white/25">or place on map</span>
-          <div className="h-px flex-1 bg-white/8" />
-        </div>
-
-        {/* Draw options */}
-        <div className="space-y-2">
-          <DrawModeButton
-            icon={RectangleHorizontal}
-            label="Place boundary on map"
-            description={`Move cursor to position the ${currentPlan?.cellSpaceDimension ?? 200}×${currentPlan?.cellSpaceDimension ?? 200}-cell square, then click to place`}
-            color="sky"
-            onClick={() => { onRequestMapDraw?.("place-square" as import("./MapInteractionLayer").MapInteractionMode); onClose(); }}
-          />
-        </div>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                const payload: ActionPayload = {
+                  action: "location",
+                  proj_center_lng: result.lng,
+                  proj_center_lat: result.lat,
+                  ...(currentPlan
+                    ? {
+                        cellResolution: currentPlan.cellResolution,
+                        cellSpaceDimension: currentPlan.cellSpaceDimension,
+                        cellSpaceDimensionLat: currentPlan.cellSpaceDimensionLat,
+                      }
+                    : {}),
+                };
+                onConfirm?.(payload);
+                onClose();
+              }}
+              className="h-auto w-full rounded-lg bg-orange-500/25 px-4 py-2 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
+            >
+              Set as project location
+            </Button>
+            <p className="text-[10px] leading-snug text-white/35">
+              This places a {currentPlan?.cellSpaceDimension ?? 200}×
+              {currentPlan?.cellSpaceDimension ?? 200}-cell grid square (
+              {(((currentPlan?.cellSpaceDimension ?? 200) * (currentPlan?.cellResolution ?? 30)) / 1000).toFixed(1)}{" "}
+              km) centered on the result. Or place it manually on the map below.
+            </p>
+          </div>
+        ) : null}
       </div>
 
-      {/* Footer */}
-      <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-3 py-1.5 text-[11px] text-white/50 transition hover:bg-white/5 hover:text-white/80"
-        >
-          Cancel
-        </button>
+      <div className="flex items-center gap-2">
+        <div className="h-px flex-1 bg-white/8" />
+        <span className="text-[9px] uppercase tracking-wider text-white/25">or place on map</span>
+        <div className="h-px flex-1 bg-white/8" />
       </div>
-    </motion.div>
+
+      <div className="space-y-2">
+        <DrawModeButton
+          icon={RectangleHorizontal}
+          label="Place boundary on map"
+          description={`Move cursor to position the ${currentPlan?.cellSpaceDimension ?? 200}×${currentPlan?.cellSpaceDimension ?? 200}-cell square, then click to place`}
+          color="sky"
+          onClick={() => {
+            onRequestMapDraw?.("place-square" as import("./MapInteractionLayer").MapInteractionMode);
+            onClose();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Ignition Modal ───────────────────────────────────────────────────────────
+
+function IgnitionModalBody({
+  actionId,
+  onClose,
+  onRequestMapDraw,
+}: {
+  actionId: "point-ignition" | "line-ignition";
+  onClose: () => void;
+  onRequestMapDraw?: (mode: MapInteractionMode) => void;
+}) {
+  if (actionId === "point-ignition") {
+    return (
+      <div className="space-y-3">
+        <p className="text-[10px] text-white/40">
+          Click a location on the map to place a point ignition source.
+        </p>
+        <DrawModeButton
+          icon={MapPin}
+          label="Place ignition pin"
+          description="Click on the map to drop a point ignition at that location"
+          color="orange"
+          onClick={() => {
+            onRequestMapDraw?.("pin");
+            onClose();
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] text-white/40">
+        Draw a line on the map to define a line ignition front.
+      </p>
+      <DrawModeButton
+        icon={Zap}
+        label="Draw a line (2 nodes)"
+        description="Click start point, then click end point to define a line ignition"
+        color="orange"
+        onClick={() => {
+          onRequestMapDraw?.("line");
+          onClose();
+        }}
+      />
+      <DrawModeButton
+        icon={PenLine}
+        label="Multi-node line"
+        description="Click multiple nodes to trace a complex ignition front, then press Escape to finish"
+        color="orange"
+        onClick={() => {
+          onRequestMapDraw?.("polyline");
+          onClose();
+        }}
+      />
+    </div>
   );
 }
 
 // ─── Fuel Break Modal ─────────────────────────────────────────────────────────
 
-function FuelBreakModal({
+function FuelBreakModalBody({
   onClose,
   onRequestMapDraw,
 }: {
@@ -770,63 +812,37 @@ function FuelBreakModal({
   onRequestMapDraw?: (mode: MapInteractionMode) => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ duration: 0.15 }}
-      className="flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141414] shadow-2xl"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <h2 className="text-sm font-semibold text-white/90">Define Fuel Break</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md p-1 text-white/40 transition hover:bg-white/10 hover:text-white/80"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+    <div className="space-y-3">
+      <p className="text-[10px] text-white/40">
+        Choose how to define the fuel break area on the map.
+      </p>
 
-      <div className="space-y-3 p-4">
-        <p className="text-[10px] text-white/40">
-          Choose how to define the fuel break area on the map.
-        </p>
-
-        <DrawModeButton
-          icon={PenLine}
-          label="Draw a line (2 nodes)"
-          description="Click start point, then click end point to define a suppression line"
-          onClick={() => { onRequestMapDraw?.("line"); onClose(); }}
-        />
-        <DrawModeButton
-          icon={Minus}
-          label="Multi-node line"
-          description="Click multiple nodes to trace a complex fuel break path, then press Escape to finish"
-          onClick={() => { onRequestMapDraw?.("polyline"); onClose(); }}
-        />
-      </div>
-
-      <div className="flex justify-end border-t border-white/10 px-4 py-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg px-3 py-1.5 text-[11px] text-white/50 transition hover:bg-white/5 hover:text-white/80"
-        >
-          Cancel
-        </button>
-      </div>
-    </motion.div>
+      <DrawModeButton
+        icon={PenLine}
+        label="Draw a line (2 nodes)"
+        description="Click start point, then click end point to define a suppression line"
+        onClick={() => {
+          onRequestMapDraw?.("line");
+          onClose();
+        }}
+      />
+      <DrawModeButton
+        icon={Minus}
+        label="Multi-node line"
+        description="Click multiple nodes to trace a complex fuel break path, then press Escape to finish"
+        onClick={() => {
+          onRequestMapDraw?.("polyline");
+          onClose();
+        }}
+      />
+    </div>
   );
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 
 /** Actions that bypass the modal and go straight to map interaction */
-export const MAP_INTERACTION_ACTIONS: ActionId[] = ["point-ignition", "line-ignition"];
+export const MAP_INTERACTION_ACTIONS: ActionId[] = [];
 /** Location manual tab uses polygon draw */
 export const POLYGON_DRAW_ACTIONS: ActionId[] = ["location"];
 
@@ -868,9 +884,6 @@ export function ActionModal({
   // Point/line ignition never show a modal — they go straight to map interaction
   const isMapOnly = actionId !== null && MAP_INTERACTION_ACTIONS.includes(actionId);
 
-  // Location manual tab shows a "draw on map" button instead of coordinate fields
-  const isLocationManual = actionId === "location" && tab === "manual";
-
   // fuel-break and location have their own dedicated modals, not the generic agent/manual tabs
   const hasManualForm = false;
 
@@ -896,32 +909,53 @@ export function ActionModal({
     setAgentPayload(p);
   }, []);
 
-  // Don't render a modal for map-only actions
   const open = actionId !== null && cfg !== null && !isMapOnly;
 
-  // Portal target — only available in the browser
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  if (!open || !actionId || !cfg) return null;
 
-  const modalContent = (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="action-modal-title"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-600 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) onClose();
-          }}
-        >
-          {/* Location gets its own dedicated modal */}
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="themed-layer flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-white/10 bg-[#141414] p-0 text-white shadow-2xl">
+        <DialogHeader className="border-b border-white/10 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+            <DialogTitle className="text-sm font-semibold text-white/90">
+              {cfg.title}
+            </DialogTitle>
+            {actionId === "location" ? (
+              <DialogDescription className="text-[11px] text-white/55">
+                Search for an address or place a boundary square directly on the map.
+              </DialogDescription>
+            ) : actionId === "point-ignition" ? (
+              <DialogDescription className="text-[11px] text-white/55">
+                Place a point ignition source on the map.
+              </DialogDescription>
+            ) : actionId === "line-ignition" ? (
+              <DialogDescription className="text-[11px] text-white/55">
+                Draw a line ignition front on the map.
+              </DialogDescription>
+            ) : actionId === "fuel-break" ? (
+              <DialogDescription className="text-[11px] text-white/55">
+                Choose how you want to draw the fuel break path on the map.
+              </DialogDescription>
+            ) : null}
+            </div>
+            <DialogClose asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6 rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white/80"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
           {actionId === "location" ? (
-            <LocationModal
+            <LocationModalBody
               onClose={onClose}
               onLocationPreview={onLocationSearchPreview}
               onRequestMapDraw={onRequestMapDraw}
@@ -929,82 +963,49 @@ export function ActionModal({
               onConfirm={onConfirm}
               currentPlan={currentPlan}
             />
+          ) : actionId === "point-ignition" || actionId === "line-ignition" ? (
+            <IgnitionModalBody actionId={actionId} onClose={onClose} onRequestMapDraw={onRequestMapDraw} />
           ) : actionId === "fuel-break" ? (
-            <FuelBreakModal
-              onClose={onClose}
-              onRequestMapDraw={onRequestMapDraw}
-            />
+            <FuelBreakModalBody onClose={onClose} onRequestMapDraw={onRequestMapDraw} />
           ) : (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
-              className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#141414] shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
+            <Tabs
+              value={tab}
+              onValueChange={(value) => setTab(value as "agent" | "manual")}
+              className="flex min-h-0 flex-1 flex-col"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-                <h2 id="action-modal-title" className="text-sm font-semibold text-white/90">
-                  {cfg.title}
-                </h2>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-md p-1 text-white/40 transition hover:bg-white/10 hover:text-white/80"
-                  aria-label="Close"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="border-b border-white/8 px-0 py-2">
+                <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-transparent p-0">
+                  <TabsTrigger
+                    value="agent"
+                    className="rounded-lg py-1.5 text-[11px] font-medium text-white/45 data-[state=active]:bg-orange-500/25 data-[state=active]:text-orange-200"
+                  >
+                    Agent
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="manual"
+                    className="rounded-lg py-1.5 text-[11px] font-medium text-white/45 data-[state=active]:bg-orange-500/25 data-[state=active]:text-orange-200"
+                  >
+                    Manual
+                  </TabsTrigger>
+                </TabsList>
               </div>
 
-              {/* Tabs — fuel-break has Agent + Manual */}
-              <div className="flex gap-1 border-b border-white/8 px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => setTab("agent")}
-                  className={cn(
-                    "flex-1 rounded-lg py-1.5 text-[11px] font-medium transition",
-                    tab === "agent"
-                      ? "bg-orange-500/25 text-orange-200"
-                      : "text-white/45 hover:bg-white/5 hover:text-white/75",
-                  )}
-                >
-                  Agent
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTab("manual")}
-                  className={cn(
-                    "flex-1 rounded-lg py-1.5 text-[11px] font-medium transition",
-                    tab === "manual"
-                      ? "bg-orange-500/25 text-orange-200"
-                      : "text-white/45 hover:bg-white/5 hover:text-white/75",
-                  )}
-                >
-                  Manual
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
-                {/* Manual form (fuel-break) */}
-                <div className={cn("min-h-0 flex-1", tab !== "manual" && "hidden")}>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
+                <TabsContent value="manual" className="min-h-0 flex-1 mt-0">
                   {hasManualForm ? (
                     <ManualTab
-                      actionId={actionId!}
+                      actionId={actionId}
                       initialValues={manualValues}
                       onValuesChange={setManualValues}
                     />
                   ) : null}
-                </div>
+                </TabsContent>
 
-                {/* Agent tab — keep mounted to survive tab switches */}
-                <div className={cn("flex min-h-0 flex-1 flex-col", tab !== "agent" && "hidden")}>
+                <TabsContent value="agent" className="min-h-0 flex-1 mt-0">
                   {threadId ? (
                     <AgentTabBody
                       key={threadId}
-                      actionId={actionId!}
+                      actionId={actionId}
                       threadId={threadId}
                       onPendingPayload={stableAgentPayloadCb}
                     />
@@ -1014,47 +1015,47 @@ export function ActionModal({
                       {JSON.stringify(agentPayload, null, 2)}
                     </pre>
                   ) : null}
-                </div>
+                </TabsContent>
               </div>
-
-              {/* Footer */}
-              <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-lg px-3 py-1.5 text-[11px] text-white/50 transition hover:bg-white/5 hover:text-white/80"
-                >
-                  Cancel
-                </button>
-                {tab === "manual" && hasManualForm ? (
-                  <button
-                    type="button"
-                    onClick={handleManualSubmit}
-                    className="rounded-lg bg-orange-500/30 px-4 py-1.5 text-[11px] font-medium text-orange-100 transition hover:bg-orange-500/45"
-                  >
-                    Confirm
-                  </button>
-                ) : tab === "agent" ? (
-                  <button
-                    type="button"
-                    disabled={!agentPayload}
-                    onClick={() => {
-                      if (agentPayload) onConfirm(agentPayload);
-                    }}
-                    className="rounded-lg bg-orange-500/30 px-4 py-1.5 text-[11px] font-medium text-orange-100 transition hover:bg-orange-500/45 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Use this
-                  </button>
-                ) : null}
-              </div>
-            </motion.div>
+            </Tabs>
           )}
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
-  );
+        </div>
 
-  return mounted ? createPortal(modalContent, document.body) : null;
+        <DialogFooter className="border-t border-white/10 px-4 py-3">
+          <DialogClose asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto rounded-lg px-3 py-1.5 text-[11px] text-white/50 hover:bg-white/5 hover:text-white/80"
+            >
+              Cancel
+            </Button>
+          </DialogClose>
+          {actionId !== "location" && actionId !== "fuel-break" && actionId !== "point-ignition" && actionId !== "line-ignition" && tab === "manual" && hasManualForm ? (
+            <Button
+              variant="ghost"
+              onClick={handleManualSubmit}
+              className="h-auto rounded-lg bg-orange-500/30 px-4 py-1.5 text-[11px] font-medium text-orange-100 hover:bg-orange-500/45"
+            >
+              Confirm
+            </Button>
+          ) : null}
+          {actionId !== "location" && actionId !== "fuel-break" && actionId !== "point-ignition" && actionId !== "line-ignition" && tab === "agent" ? (
+            <Button
+              variant="ghost"
+              disabled={!agentPayload}
+              onClick={() => {
+                if (agentPayload) onConfirm(agentPayload);
+              }}
+              className="h-auto rounded-lg bg-orange-500/30 px-4 py-1.5 text-[11px] font-medium text-orange-100 hover:bg-orange-500/45"
+            >
+              Use this
+            </Button>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function defaultManualValues(actionId: ActionId): Record<string, string> {
