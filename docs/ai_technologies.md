@@ -1,0 +1,29 @@
+# AI Technologies & Frameworks
+
+FireMapSim-v2 utilizes a tailored "Agentic AI" stack designed for high reliability and real-time synchronization with a geospatial UI.
+
+## Core Framework: Mastra
+The project is built on the [Mastra Framework](https://mastra.ai/), which provides the runtime for AI agents. Key Mastra features used include:
+
+- **Agent Definition**: Decentralized agent logic defined in `src/mastra/agents/`, separating system instructions from application logic.
+- **Memory**: Using Mastra's memory system (backed by LibSQL) to maintain conversation context, allowing the agent to remember project locations and user preferences across multiple turns.
+- **Tools Capability**: While currently the agent focuses on structured output, it is configured to support tools for fetching weather or interacting with the database directly.
+
+## LLM Gateway: OpenRouter
+For reasoning and natural language processing, the system uses **OpenRouter** as a gateway to state-of-the-art models. For this project, the model Qwen 3.5 has been used (Open Source model by Alibaba) This provides:
+- **Model Flexibility**: Ability to switch models based on performance/cost requirements.
+- **Structured JSON Support**: Ensuring the models reliably emit the specific JSON blocks required for UI synchronization.
+
+## Streaming & UI Hooks: Vercel AI SDK
+The frontend integrates with the AI backend using the **Vercel AI SDK** (`ai` and `@ai-sdk/react`).
+- **`useChat` Hook**: Simplifies the management of message history and streaming responses.
+- **Protocol Support**: Efficiently handles the streaming of text and structured data from Mastra agents to the React components.
+
+A high-level overview of the sync flow is available in the separate diagram file:
+
+[View Agent UI Sync Source (PlantUML)](./diagrams/agent_ui_sync.puml)
+
+### Supported JSON Envelopes:
+1. **`setup-update`**: Updates individual fields (e.g., wind speed, humidity).
+2. **`action-result`**: Results of complex geospatial actions (e.g., placing multiple ignitions).
+3. **`run-trigger`**: Final confirmation to execute the simulation engine.

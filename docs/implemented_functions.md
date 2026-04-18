@@ -1,0 +1,30 @@
+# Implemented Functions
+
+The following core functionalities have been implemented in FireMapSim-v2:
+
+## 1. Geospatial Project Workspace
+- **Map Visualization**: Interactive map using Leaflet for spatial context.
+- **Area Definition**: Users can define a project bounding box (`proj_center_lat`, `proj_center_lng`) which serves as the simulation grid.
+- **Drawing Tools**: Integrated tools for placing point ignitions, line ignitions, and fuel breaks (suppression lines) directly on the map.
+
+## 2. Agentic Simulation Planner
+- **AI-Guided Setup**: A Mastra-powered agent (`fireSimAgent`) that interacts with users via chat to collect simulation parameters one by one.
+- **Structured JSON Synchronization**: The agent emits special JSON blocks (`setup-update`, `action-result`, `run-trigger`) that the frontend parses to update the UI state in real-time.
+- **Unit Conversion**: Automatic conversion between human time (hours) and simulation timesteps (1 hour = 500 timesteps).
+
+## 3. Dynamic Weather Integration
+- **Weather Fetching**: Dedicated API routes to fetch weather data based on ZIP codes or map coordinates.
+- **Parameter Population**: Automatically populates wind speed, wind direction, temperature, and humidity for the simulation project file. 
+
+## 4. Simulation Lifecycle Management
+- **One-Click Run**: Triggering the DEVS-FIRE simulation engine via backend proxy routes.
+- **Progress Tracking**: Real-time stats visualization (area burned, number of cells ignited).
+- **Replay Feature**: Ability to replay past simulations to analyze fire spread dynamics.
+- **Project Reset**: Comprehensive data clearing to start a new simulation on a clean slate.
+
+## 5. Persistence & State Management
+- **Supabase Integration**: Persisting user projects, simulation results, and configurations to the cloud.
+- **Local Workspace State**: Robust React state management for the "Scenario Setup" workflow, ensuring changes in chat are reflected in the UI panels and vice versa.
+
+## 6. Authentication
+- **Clerk Integration**: Secure user authentication and session management.

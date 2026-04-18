@@ -1,0 +1,15 @@
+@startuml
+actor User
+participant "Mastra Chat" as Chat
+participant "FireSim Agent (Qwen 3.5)" as Agent
+participant "Zod Parser" as Parser
+participant "Global UI State" as State
+
+User -> Chat : "Set location to Yosemite"
+Chat -> Agent : "Process Input"
+Agent -> Agent : "Generate Response + \n```setup-update```"
+Agent -> Chat : "Streaming JSON"
+Chat -> Parser : "Extract JSON"
+Parser -> State : "Update Project Area"
+State -> User : "Visual Feedback on Map"
+@enduml
