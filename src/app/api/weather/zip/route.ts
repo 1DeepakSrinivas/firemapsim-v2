@@ -27,7 +27,11 @@ function assertWithinUsMapExtent(lat: number, lng: number): void {
   }
 }
 
-async function reverseGeocodeAddress(lat: number, lng: number): Promise<string> {
+async function reverseGeocodeAddress(lat: number, lng: number): Promise<{
+  label: string;
+  county?: string;
+  state?: string;
+}> {
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lng));
@@ -39,7 +43,9 @@ async function reverseGeocodeAddress(lat: number, lng: number): Promise<string> 
     cache: "no-store",
   });
 
-  if (!response.ok) return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  if (!response.ok) {
+    return { label: `${lat.toFixed(4)}, ${lng.toFixed(4)}` };
+  }
 
   const data = (await response.json()) as {
     display_name?: string;
@@ -55,10 +61,20 @@ async function reverseGeocodeAddress(lat: number, lng: number): Promise<string> 
   const addr = data.address;
   if (addr) {
     const parts = [addr.city || addr.town || addr.village || addr.county, addr.state].filter(Boolean);
-    if (parts.length > 0) return parts.join(", ");
+    if (parts.length > 0) {
+      return {
+        label: parts.join(", "),
+        county: addr.county,
+        state: addr.state,
+      };
+    }
   }
 
-  return data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  return {
+    label: data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+    county: addr?.county,
+    state: addr?.state,
+  };
 }
 
 async function geocodeUsAddress(query: string): Promise<{
@@ -126,6 +142,8 @@ export async function GET(request: NextRequest) {
     let lat: number;
     let lng: number;
     let label: string;
+    let county: string | undefined;
+    let state: string | undefined;
 
     if (
       typeof parsed.data.lat === "number" &&
@@ -133,7 +151,10 @@ export async function GET(request: NextRequest) {
     ) {
       lat = parsed.data.lat;
       lng = parsed.data.lng;
-      label = await reverseGeocodeAddress(lat, lng);
+      const reverse = await reverseGeocodeAddress(lat, lng);
+      label = reverse.label;
+      county = reverse.county;
+      state = reverse.state;
     } else {
       const query = parsed.data.q ?? parsed.data.zip;
       if (!query) {
@@ -165,6 +186,8 @@ export async function GET(request: NextRequest) {
       placeLabel: label,
       lat,
       lng,
+      county,
+      state,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Weather lookup failed";
