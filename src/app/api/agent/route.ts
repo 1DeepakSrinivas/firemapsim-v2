@@ -15,6 +15,8 @@ const requestSchema = z
     trigger: z.string().optional(),
     messageId: z.string().optional(),
     id: z.string().optional(),
+    mode: z.union([z.literal("manual"), z.literal("chat"), z.null()]).optional(),
+    planSnapshot: z.unknown().optional(),
   })
   .passthrough();
 
@@ -69,6 +71,18 @@ export async function POST(request: NextRequest) {
     }
 
     const thread = body.threadId ?? `thread-${crypto.randomUUID()}`;
+    const mode = body.mode === "manual" || body.mode === "chat" ? body.mode : null;
+    const planSnapshot = body.planSnapshot ?? null;
+
+    const runtimeContextSystem = [
+      "RUNTIME_CONTEXT",
+      "Treat the following JSON as the current frontend state for this turn.",
+      "Use it to avoid re-asking for already-filled values and to honor mode behavior.",
+      JSON.stringify({
+        mode,
+        planSnapshot,
+      }),
+    ].join("\n");
 
     const uiStream = await handleChatStream({
       mastra,
@@ -83,6 +97,7 @@ export async function POST(request: NextRequest) {
           thread,
           resource: userId,
         },
+        system: runtimeContextSystem,
       },
     });
 
