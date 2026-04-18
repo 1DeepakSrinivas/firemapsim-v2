@@ -12,6 +12,9 @@ import {
   type ReactNode,
 } from "react";
 
+import type { IgnitionPlan } from "@/types/ignitionPlan";
+import type { ProjectWorkflowMode } from "@/stores/projectWorkspaceStore";
+
 const DEFAULT_INTRO_USER_MESSAGE =
   "Hello, I'm ready to set up a simulation. Please guide me.";
 
@@ -41,6 +44,8 @@ type ChatHelpers = {
 
 type ProjectAgentChatHostProps = {
   projectId: string;
+  mode: ProjectWorkflowMode;
+  planSnapshot: IgnitionPlan;
   initialMessages: UIMessage[];
   introDoneServer: boolean;
   onPersist: (messages: UIMessage[], introDone: boolean) => void;
@@ -50,6 +55,8 @@ type ProjectAgentChatHostProps = {
 
 export function ProjectAgentChatHost({
   projectId,
+  mode,
+  planSnapshot,
   initialMessages,
   introDoneServer,
   onPersist,
@@ -61,7 +68,11 @@ export function ProjectAgentChatHost({
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: "/api/agent",
-      body: () => ({ threadId: `project-${projectId}` }),
+      body: () => ({
+        threadId: `project-${projectId}`,
+        mode,
+        planSnapshot,
+      }),
     }),
   });
 
