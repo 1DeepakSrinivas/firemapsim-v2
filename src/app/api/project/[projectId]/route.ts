@@ -25,6 +25,12 @@ const weatherSchema = z.object({
   humidity: z.number(),
 });
 
+const workflowModeSchema = z.union([
+  z.literal("manual"),
+  z.literal("chat"),
+  z.null(),
+]);
+
 const firePointSchema = z.object({
   x: z.coerce.number(),
   y: z.coerce.number(),
@@ -44,6 +50,7 @@ const putBodySchema = z.object({
   /** Full IgnitionPlan JSON — use loose validation so nested GeoJSON/arrays always round-trip. */
   plan: z.any(),
   weather: weatherSchema,
+  workflowMode: workflowModeSchema.optional(),
   lastSimulation: z.union([lastSimulationSchema, z.null()]).optional(),
   /** Serialized AI SDK UI messages for the project agent chat. */
   agentChatMessages: z.array(z.unknown()).optional(),
@@ -72,6 +79,7 @@ type MapProjectCompatRow = {
   title: string;
   plan: unknown;
   weather: unknown;
+  workflow_mode?: unknown;
   updated_at: string | null;
   user_id: string;
   last_simulation?: unknown;
@@ -103,6 +111,23 @@ function toCompatError(error: unknown, fallbackMessage: string): CompatError {
 }
 
 const PROJECT_SELECT_CANDIDATES: ProjectSelectCandidate[] = [
+  {
+    select:
+      "id, title, plan, weather, workflow_mode, last_simulation, updated_at, user_id, agent_chat_messages, agent_chat_intro_done",
+    hasLastSimulation: true,
+    hasAgentChat: true,
+  },
+  {
+    select:
+      "id, title, plan, weather, workflow_mode, updated_at, user_id, agent_chat_messages, agent_chat_intro_done",
+    hasLastSimulation: false,
+    hasAgentChat: true,
+  },
+  {
+    select: "id, title, plan, weather, workflow_mode, updated_at, user_id",
+    hasLastSimulation: false,
+    hasAgentChat: false,
+  },
   {
     select:
       "id, title, plan, weather, last_simulation, updated_at, user_id, agent_chat_messages, agent_chat_intro_done",
@@ -200,6 +225,11 @@ async function updateProjectCompat(
     ) {
       delete updatePayload.agent_chat_messages;
       delete updatePayload.agent_chat_intro_done;
+      removedAny = true;
+    }
+
+    if (message.includes("workflow_mode") && "workflow_mode" in updatePayload) {
+      delete updatePayload.workflow_mode;
       removedAny = true;
     }
 
@@ -325,6 +355,10 @@ export async function GET(_request: Request, context: RouteContext) {
       project.weather && typeof project.weather === "object"
         ? { ...defaultWeather(), ...(project.weather as object) }
         : defaultWeather(),
+    workflowMode:
+      (project.workflow_mode === "manual" || project.workflow_mode === "chat")
+        ? project.workflow_mode
+        : null,
     lastSimulation,
     agentChatMessages,
     agentChatIntroDone,
@@ -388,6 +422,9 @@ export async function PUT(request: Request, context: RouteContext) {
     weather: body.weather,
     updated_at: new Date().toISOString(),
   };
+  if (body.workflowMode !== undefined) {
+    updatePayload.workflow_mode = body.workflowMode;
+  }
   if (body.lastSimulation !== undefined) {
     updatePayload.last_simulation =
       body.lastSimulation === null
