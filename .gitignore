@@ -48,6 +48,10 @@ opencode.json
 agent-notes/*
 .gemini/
 
+# bun runtime 
+/.bun
+bun-*.log
+
 #Drizzle
 /tmp/
 
