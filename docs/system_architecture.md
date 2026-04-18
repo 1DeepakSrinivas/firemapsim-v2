@@ -1,0 +1,28 @@
+# System Architecture
+
+The FireMapSim-v2 system is built on a modern full-stack architecture that integrates agentic AI with geospatial simulation engines.
+
+## Architecture Diagram
+
+The system architecture diagram is maintained in a separate file for better version control and reusability.
+
+[View System Architecture Source (PlantUML)](./diagrams/system_architecture.puml)
+
+## Component Description
+
+### 1. Frontend (Next.js Client)
+- **Map Workspace**: Uses `react-leaflet` for map rendering and `react-konva` for drawing high-performance geometric overlays (ignitions, fuel breaks).
+- **Chat Interface**: Powered by `Mastra` and `Vercel AI SDK` to provide a streaming chat experience. It handles structured output parsing to update the application state.
+- **State Manager**: Centralized React state that synchronizes data between the Chat, Map, and Simulation panels.
+
+### 2. Agentic AI Layer
+- **Mastra Agent**: Orchestrates the intake process. It uses instructions to ensure all DEVS-FIRE parameters are collected.
+- **Structured Output**: Instead of just text, the agent produces `setup-update` and `run-trigger` JSON blocks that act as commands for the frontend.
+- **Memory**: Maintains conversation history via Mastra's memory system, ensuring the agent remembers previously set parameters.
+
+### 3. Backend Services
+- **Weather Service**: Resolves location data to current meteorological conditions needed for the fire model.
+- **DEVS-FIRE Proxy**: Communicates with the core simulation engine (often running as a separate service accessible via MCP or HTTP) to execute simulations and return results.
+
+### 4. Data Layer
+- **Supabase**: Handles user authentication (via Clerk integration) and provides a PostgreSQL database for storing project configurations and simulation outputs.

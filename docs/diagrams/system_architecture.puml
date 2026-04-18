@@ -1,0 +1,39 @@
+@startuml
+!theme toy
+
+package "Frontend (Next.js Client)" {
+    [Map Workspace (Leaflet/Konva)] as Map
+    [Chat Interface (Mastra Client)] as Chat
+    [Project Dashboard] as Dashboard
+    [State Manager (React Context)] as State
+}
+
+package "Agentic AI Layer" {
+    [Mastra Agent (Fire Simulation Planner)] as Agent
+    [LLM (OpenRouter/Qwen 3.5)] as LLM
+    [Memory System (LibSQL)] as Memory
+}
+
+package "Backend Services (Next.js API)" {
+    [Weather Service] as WeatherAPI
+    [DEVS-FIRE Proxy] as FireProxy
+    [Project API] as ProjectAPI
+}
+
+package "External Systems" {
+    [DEVS-FIRE Simulation Engine] as Engine
+    [Weather Provider (OpenWeatherMap)] as WeatherData
+    [Supabase (DB & Auth)] as Supabase
+}
+
+Chat <--> Component : "Prompts / JSON Streams"
+Chat --> Agent : "User Input"
+Agent <--> LLM : "Reasoning"
+Agent --> State : "Structured Setup Updates"
+Map <--> State : "Geo Features"
+Dashboard --> ProjectAPI : "Get/Save Projects"
+ProjectAPI <--> Supabase : "Persistence"
+FireProxy --> Engine : "Trigger Simulation"
+WeatherAPI --> WeatherData : "Fetch Real-time Data"
+
+@enduml
