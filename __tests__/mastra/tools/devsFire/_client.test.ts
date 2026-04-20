@@ -1,10 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { parseSimulationOperationsResponse } from "./simulationOperations";
+import { parseSimulationOperationsResponse } from "@/mastra/tools/devsFire/simulationOperations";
 
 async function loadClientModule() {
   mock.module("server-only", () => ({}));
-  return import("./_client");
+  return import("@/mastra/tools/devsFire/_client");
 }
 
 describe("parseSimulationOperationsResponse", () => {

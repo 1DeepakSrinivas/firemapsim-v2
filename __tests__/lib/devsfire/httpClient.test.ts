@@ -5,7 +5,7 @@ import { DevsFireError } from "@/lib/devsfire/errors";
 mock.module("server-only", () => ({}));
 
 async function loadHttpClient() {
-  return import("./httpClient");
+  return import("@/lib/devsfire/httpClient");
 }
 
 describe("devsFireRequest", () => {

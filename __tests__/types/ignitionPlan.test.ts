@@ -4,7 +4,7 @@ import {
   ignitionModeForGeometry,
   ignitionModeOptionsForCurrent,
   normalizeIgnitionPlan,
-} from "./ignitionPlan";
+} from "@/types/ignitionPlan";
 
 function buildApiSamplePlan() {
   return {

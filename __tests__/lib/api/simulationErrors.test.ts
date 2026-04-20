@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { TooManyPointIgnitionsError } from "@/lib/devsFireIgnitionDispatch";
-import { classifySimulationError } from "./simulationErrors";
+import { classifySimulationError } from "@/lib/api/simulationErrors";
 
 describe("classifySimulationError", () => {
   test("returns structured 400 for too many point ignitions", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { defaultIgnitionPlan } from "@/types/ignitionPlan";
-import { bootstrapTerrainSession, fetchTerrainMatrix } from "./devsFireBrowser";
+import { bootstrapTerrainSession, fetchTerrainMatrix } from "@/lib/devsFireBrowser";
 
 type RouteCall = {
   url: string;

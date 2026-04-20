@@ -26,7 +26,7 @@ mock.module("@/mastra/tools/devsFire/_client", () => ({
 }));
 
 async function callDiagnostics(headers?: HeadersInit) {
-  const { GET } = await import("./route");
+  const { GET } = await import("@/app/api/devs-fire/diagnostics/route");
   return GET(
     new Request("http://localhost:3000/api/devs-fire/diagnostics", {
       method: "GET",

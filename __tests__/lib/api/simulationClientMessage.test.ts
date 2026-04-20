@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { formatSimulationRunFailureMessage } from "./simulationClientMessage";
+import { formatSimulationRunFailureMessage } from "@/lib/api/simulationClientMessage";
 
 describe("formatSimulationRunFailureMessage", () => {
   test("prefers hint when available", () => {
