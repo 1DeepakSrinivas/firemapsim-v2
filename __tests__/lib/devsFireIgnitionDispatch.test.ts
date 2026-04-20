@@ -62,6 +62,7 @@ describe("buildIgnitionDispatchCommands", () => {
       speed: 3,
       teamName: "team0",
     });
+    expect(Object.hasOwn(first ?? {}, "distance")).toBe(false);
     expect(second).toMatchObject({
       kind: "setDynamicIgnition",
       x1: 8,
@@ -75,6 +76,78 @@ describe("buildIgnitionDispatchCommands", () => {
     });
     expect(Object.hasOwn(first ?? {}, "x3")).toBe(false);
     expect(Object.hasOwn(second ?? {}, "x3")).toBe(false);
+  });
+
+  test("spot dynamic ignitions default distance to 0 when missing", () => {
+    const plan = normalizeIgnitionPlan({
+      team_infos: [
+        {
+          team_name: "team0",
+          details: [
+            {
+              start_x: 10,
+              start_y: 190,
+              end_x: 11,
+              end_y: 8,
+              speed: 3,
+              mode: "spot",
+              distance: null,
+            },
+          ],
+        },
+      ],
+      sup_infos: [],
+      proj_center_lng: -123.1,
+      proj_center_lat: 46.9,
+      cellResolution: 30,
+      cellSpaceDimension: 200,
+      cellSpaceDimensionLat: 200,
+    });
+
+    const { commands } = buildIgnitionDispatchCommands(plan);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      kind: "setDynamicIgnition",
+      mode: "spot",
+      distance: 0,
+    });
+  });
+
+  test("continuous dynamic ignitions never emit distance", () => {
+    const plan = normalizeIgnitionPlan({
+      team_infos: [
+        {
+          team_name: "team0",
+          details: [
+            {
+              start_x: 10,
+              start_y: 190,
+              end_x: 11,
+              end_y: 8,
+              speed: 3,
+              mode: "continuous",
+              distance: 9,
+            },
+          ],
+        },
+      ],
+      sup_infos: [],
+      proj_center_lng: -123.1,
+      proj_center_lat: 46.9,
+      cellResolution: 30,
+      cellSpaceDimension: 200,
+      cellSpaceDimensionLat: 200,
+    });
+
+    const { commands } = buildIgnitionDispatchCommands(plan);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      kind: "setDynamicIgnition",
+      mode: "continuous",
+    });
+    expect(Object.hasOwn((commands[0] ?? {}) as Record<string, unknown>, "distance")).toBe(
+      false,
+    );
   });
 
   test("keeps true points as setPointIgnition payloads", () => {

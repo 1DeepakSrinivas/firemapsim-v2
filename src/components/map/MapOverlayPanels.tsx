@@ -1235,7 +1235,7 @@ function IgnitionModeSelect({
   onSegmentEdit: (edit: SegmentEdit) => void;
 }) {
   const value = ignitionModeForGeometry(mode, isPoint);
-  const options = ignitionModeOptionsForCurrent(value);
+  const options = ignitionModeOptionsForCurrent(value, isPoint);
 
   return (
     <Select

@@ -1439,7 +1439,7 @@ export function ProjectWorkspace({
             end_x: e.x,
             end_y: e.y,
             speed: DEFAULT_IGNITION_SPEED_MPS,
-            mode: "continuous_static",
+            mode: "continuous",
             distance: null,
           };
     pendingActionRef.current = null;
@@ -1519,7 +1519,7 @@ export function ProjectWorkspace({
           end_x: e.x,
           end_y: e.y,
           speed: DEFAULT_IGNITION_SPEED_MPS,
-          mode: "continuous_static",
+          mode: "continuous",
           distance: null,
         };
         setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
