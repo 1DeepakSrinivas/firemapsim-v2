@@ -53,10 +53,6 @@ type CedarCaptionChatProps = {
   onUpdatePlanPatch?: (patch: IgnitionPlanLoosePatch) => void;
   onRunTrigger?: (trigger: RunTrigger) => void;
   onAgentCommand?: (command: AgentCommandTrigger) => void;
-  showStarterPrompt?: boolean;
-  starterPromptText?: string;
-  onSendStarterPrompt?: () => Promise<void>;
-  onDismissStarterPrompt?: () => Promise<void>;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -225,14 +221,9 @@ export function CedarCaptionChat({
   onUpdatePlanPatch,
   onRunTrigger,
   onAgentCommand,
-  showStarterPrompt = false,
-  starterPromptText,
-  onSendStarterPrompt,
-  onDismissStarterPrompt,
 }: CedarCaptionChatProps) {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(true);
-  const [starterBusy, setStarterBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const processedIds = useRef<Set<string>>(new Set());
   const processedToolPatches = useRef<Set<string>>(new Set());
@@ -306,7 +297,7 @@ export function CedarCaptionChat({
           initial={{ opacity: 0, y: 6, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
-          className="themed-layer flex items-center gap-2 rounded-full border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-[11px] font-medium text-white/70 shadow-2xl backdrop-blur transition hover:bg-[#222]/95 hover:text-white sm:gap-2.5 sm:px-4 sm:py-2 sm:text-xs"
+          className="themed-layer flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-1.5 text-[11px] font-medium text-muted-foreground shadow-2xl backdrop-blur transition hover:bg-muted hover:text-foreground sm:gap-2.5 sm:px-4 sm:py-2 sm:text-xs"
         >
           <span
             className={
@@ -331,10 +322,10 @@ export function CedarCaptionChat({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 8, scale: 0.985 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className={`themed-layer pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1a]/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
+        className={`themed-layer pointer-events-auto flex w-full flex-col overflow-hidden rounded-xl border border-border bg-card/95 shadow-2xl backdrop-blur sm:rounded-2xl sm:w-[min(560px,calc(100vw-2rem))] md:w-[min(600px,calc(100vw-16rem))] ${className ?? ""}`}
       >
       {/* Title bar */}
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2 sm:px-4 sm:py-2.5">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2 sm:px-4 sm:py-2.5">
         <div className="flex items-center gap-2">
           <span
             className={
@@ -345,19 +336,19 @@ export function CedarCaptionChat({
                   : "cedar-status-dot cedar-status-dot--idle"
             }
           />
-          <span className="text-[11px] font-semibold tracking-wide text-white/80 sm:text-xs">
+          <span className="text-[11px] font-semibold tracking-wide text-foreground sm:text-xs">
             FireMapSim Agent Chat
           </span>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
           {isBusy && (
-            <span className="hidden text-[10px] text-white/35 sm:inline">Streaming</span>
+            <span className="hidden text-[10px] text-muted-foreground sm:inline">Streaming</span>
           )}
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setOpen(false)}
-            className="text-white/30 hover:text-white/70"
+            className="text-muted-foreground hover:text-foreground"
           >
             <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
           </Button>
@@ -367,59 +358,12 @@ export function CedarCaptionChat({
       {/* Messages — iMessage-style bubbles */}
       <div
         ref={scrollRef}
-        className="cedar-scroll max-h-40 space-y-1 overflow-y-auto bg-[#0a0a0a]/50 p-2.5 sm:max-h-52 sm:space-y-1.5 sm:p-3"
+        className="cedar-scroll max-h-40 space-y-1 overflow-y-auto bg-muted/40 p-2.5 sm:max-h-52 sm:space-y-1.5 sm:p-3"
       >
         {messages.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-white/10 p-2.5 text-[10px] text-white/30 sm:p-3 sm:text-[11px]">
+          <p className="rounded-lg border border-dashed border-border p-2.5 text-[10px] text-muted-foreground sm:p-3 sm:text-[11px]">
             Starting simulation setup…
           </p>
-        ) : null}
-
-        {showStarterPrompt && starterPromptText ? (
-          <div className="rounded-lg border border-blue-500/25 bg-blue-500/10 p-2.5 sm:p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-200/90 sm:text-[11px]">
-              Suggested starter prompt
-            </p>
-            <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-white/90 sm:text-[12px]">
-              {starterPromptText}
-            </p>
-            <div className="mt-2 flex items-center gap-1.5 sm:gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={starterBusy || isBusy}
-                onClick={async () => {
-                  if (!onSendStarterPrompt) return;
-                  setStarterBusy(true);
-                  try {
-                    await onSendStarterPrompt();
-                  } finally {
-                    setStarterBusy(false);
-                  }
-                }}
-                className="h-auto rounded-md bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-blue-500 sm:text-[11px]"
-              >
-                Send
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={starterBusy || isBusy}
-                onClick={async () => {
-                  if (!onDismissStarterPrompt) return;
-                  setStarterBusy(true);
-                  try {
-                    await onDismissStarterPrompt();
-                  } finally {
-                    setStarterBusy(false);
-                  }
-                }}
-                className="h-auto rounded-md border-white/15 bg-transparent px-2.5 py-1 text-[10px] font-medium text-white/70 hover:bg-white/8 hover:text-white sm:text-[11px]"
-              >
-                Dismiss
-              </Button>
-            </div>
-          </div>
         ) : null}
 
         {messages.map((message) => {
@@ -437,7 +381,7 @@ export function CedarCaptionChat({
                 className={`max-w-[min(100%,14rem)] px-2.5 py-1.5 text-left text-[11px] leading-snug shadow-sm sm:max-w-[min(72%,18rem)] sm:px-3 sm:py-2 sm:text-[12px] ${
                   isUser
                     ? "rounded-[0.95rem] rounded-br-sm bg-[#0A84FF] text-white text-pretty"
-                    : "rounded-[0.95rem] rounded-bl-sm bg-[#3A3A3C] text-white/95 text-pretty"
+                    : "rounded-[0.95rem] rounded-bl-sm bg-muted text-foreground text-pretty"
                 }`}
               >
                 <p className="whitespace-pre-wrap">
@@ -451,7 +395,7 @@ export function CedarCaptionChat({
 
       {/* Input */}
       <form
-        className="shrink-0 border-t border-white/10 px-2.5 py-2 sm:px-3 sm:py-2.5"
+        className="shrink-0 border-t border-border px-2.5 py-2 sm:px-3 sm:py-2.5"
         onSubmit={async (e) => {
           e.preventDefault();
           const prompt = input;
@@ -465,7 +409,7 @@ export function CedarCaptionChat({
             onChange={(e) => setInput(e.target.value)}
             placeholder="Reply to the agent…"
             disabled={isBusy}
-            className="h-auto flex-1 rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/30 focus-visible:ring-white/20 sm:px-3 sm:py-2 sm:text-xs"
+            className="h-auto flex-1 rounded-lg border-border bg-background px-2.5 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:ring-ring sm:px-3 sm:py-2 sm:text-xs"
           />
           <Button
             disabled={isBusy || !input.trim()}

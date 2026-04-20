@@ -32,23 +32,30 @@ import type {
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 
 import { normalizeOverlay } from "@/lib/simulationOverlay";
+import { formatSimulationRunFailureMessage } from "@/lib/api/simulationClientMessage";
+import { buildSimulationRunRequestBody } from "@/lib/api/simulationRunRequest";
 import {
   hasSavedProjectMapPosition,
   navigateMapToProject,
   projectMapPositionKey,
 } from "@/lib/mapProjectNavigation";
 import { ensurePlanBoundary, pointInBoundary } from "@/lib/projectBoundary";
+import { hasNonZeroCenter } from "@/lib/geoCoords";
 import {
   applySegmentEdit,
   defaultIgnitionPlan,
   mergeActionIntoPlan,
+  normalizeIgnitionPlan,
   type ActionPayload,
   type BoundaryGeoJSON,
   type IgnitionPlan,
   type SegmentEdit,
 } from "@/types/ignitionPlan";
+import type {
+  LatestSimulationReplay,
+  LatestSimulationSummary,
+} from "@/types/latestSimulation";
 import type { TerrainOverlayState } from "@/components/map/MapOverlayPanels";
-import type { LastSimulationSnapshot } from "@/types/lastSimulation";
 import {
   createProjectWorkspaceStore,
   useProjectWorkspaceStore,
@@ -75,7 +82,6 @@ const DEFAULT_SIMULATION_TIMESTEPS = 12000;
 const MAX_SIMULATION_TIMESTEPS = 100000;
 const TIMESTEPS_PER_HOUR = 500;
 const DEFAULT_IGNITION_SPEED_MPS = 3;
-const DEFAULT_STATIC_SPACING_CELLS = 5;
 
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -150,8 +156,10 @@ export function ProjectWorkspace({
 
   const [mapRef, setMapRef] = useState<import("leaflet").Map | null>(null);
   const [mapBounds, setMapBounds] = useState<BoundsChangePayload | null>(null);
-  const [lastSimulationSnapshot, setLastSimulationSnapshot] =
-    useState<LastSimulationSnapshot | null>(null);
+  const [latestSimulationSummary, setLatestSimulationSummary] =
+    useState<LatestSimulationSummary | null>(null);
+  const [latestSimulationReplay, setLatestSimulationReplay] =
+    useState<LatestSimulationReplay | null>(null);
   const [replayFrame, setReplayFrame] = useState<FireOverlayPoint[] | null>(null);
   const [replayState, setReplayState] = useState<"idle" | "playing" | "paused">("idle");
   const [replayCursor, setReplayCursor] = useState<number | null>(null);
@@ -217,6 +225,7 @@ export function ProjectWorkspace({
     messages: UIMessage[];
     introDone: boolean;
   } | null>(null);
+  const [guidedAutoStartNonce, setGuidedAutoStartNonce] = useState(0);
   const [chatMountKey, setChatMountKey] = useState(0);
   const [isDesktopViewport, setIsDesktopViewport] = useState<boolean | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -292,6 +301,7 @@ export function ProjectWorkspace({
 
   const replayFrameRef = useRef<number | null>(null);
   const replayLastTsRef = useRef<number | null>(null);
+  const replayCursorRef = useRef(0);
   const autoReplayAfterRunRef = useRef(false);
 
   useEffect(() => {
@@ -307,9 +317,13 @@ export function ProjectWorkspace({
   }, []);
 
   const replayMaxTime = useMemo(() => {
-    const points = lastSimulationSnapshot?.overlay ?? [];
+    const points = latestSimulationReplay?.overlay ?? [];
     return points.reduce((max, p) => Math.max(max, p.time), 0);
-  }, [lastSimulationSnapshot]);
+  }, [latestSimulationReplay]);
+
+  useEffect(() => {
+    replayCursorRef.current = replayCursor ?? 0;
+  }, [replayCursor]);
 
   useEffect(() => {
     if (replayState !== "playing") {
@@ -318,7 +332,8 @@ export function ProjectWorkspace({
     }
     const maxTime = replayMaxTime;
     if (maxTime <= 0) {
-      setReplayFrame(lastSimulationSnapshot?.overlay ?? null);
+      setReplayFrame(latestSimulationReplay?.overlay ?? null);
+      replayCursorRef.current = maxTime;
       setReplayCursor(maxTime);
       setReplayState("idle");
       return;
@@ -330,15 +345,16 @@ export function ProjectWorkspace({
       }
       const dt = ts - replayLastTsRef.current;
       replayLastTsRef.current = ts;
-      setReplayCursor((prev) => {
-        const base = prev ?? 0;
-        const next = base + (dt / 1000) * playbackRate;
-        if (next >= maxTime) {
-          setReplayState("idle");
-          return maxTime;
-        }
-        return next;
-      });
+      const base = replayCursorRef.current;
+      const next = base + (dt / 1000) * playbackRate;
+      if (next >= maxTime) {
+        replayCursorRef.current = maxTime;
+        setReplayCursor(maxTime);
+        setReplayState("idle");
+        return;
+      }
+      replayCursorRef.current = next;
+      setReplayCursor(next);
       replayFrameRef.current = requestAnimationFrame(tick);
     };
 
@@ -346,7 +362,7 @@ export function ProjectWorkspace({
     return () => {
       stopReplayAnimation();
     };
-  }, [replayState, replayMaxTime, playbackRate, lastSimulationSnapshot, stopReplayAnimation]);
+  }, [replayState, replayMaxTime, playbackRate, latestSimulationReplay, stopReplayAnimation]);
 
   useEffect(() => {
     return () => {
@@ -366,13 +382,13 @@ export function ProjectWorkspace({
   }, [replayState]);
 
   useEffect(() => {
-    if (!lastSimulationSnapshot || replayState === "idle") {
+    if (!latestSimulationReplay || replayState === "idle") {
       setReplayFrame(null);
       return;
     }
     const cursor = replayCursor ?? 0;
-    setReplayFrame(lastSimulationSnapshot.overlay.filter((p) => p.time <= cursor));
-  }, [lastSimulationSnapshot, replayCursor, replayState]);
+    setReplayFrame(latestSimulationReplay.overlay.filter((p) => p.time <= cursor));
+  }, [latestSimulationReplay, replayCursor, replayState]);
 
   const handleStartSimulation = useCallback(
     async (simulationTimesteps: number) => {
@@ -382,49 +398,93 @@ export function ProjectWorkspace({
       setReplayFrame(null);
       setReplayState("idle");
       setReplayCursor(null);
-      setLastSimulationSnapshot(null); // Reset stats modal immediately
+      setLatestSimulationSummary(null);
+      setLatestSimulationReplay(null);
       if (readyBadgeTimerRef.current) {
         clearTimeout(readyBadgeTimerRef.current);
         readyBadgeTimerRef.current = null;
       }
       setSimulationRun({ status: "running", error: null });
+      toast("Simulation is being processed...", {
+        id: "simulation-status",
+      });
 
-      const planPayload: IgnitionPlan = {
-        ...projectConfig,
-        windSpeed: weather.windSpeed,
-        windDegree: weather.windDirection,
-        temperature: weather.temperature,
-        humidity: weather.humidity,
-        total_sim_time: requestedTimesteps,
-      };
+      const requestBody = buildSimulationRunRequestBody({
+        projectId,
+        plan: projectConfig,
+        weather,
+        weatherOverrides,
+        simulationTimesteps: requestedTimesteps,
+      });
 
       try {
         const res = await fetch("/api/simulation/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            plan: planPayload,
-            // Legacy request key expected by the route schema; value is timesteps.
-            simulationHours: requestedTimesteps,
-            weatherOverrides,
-          }),
+          body: JSON.stringify(requestBody),
         });
-        const json = (await res.json()) as {
+        const raw = await res.text();
+        const json = ((text: string): any => {
+          if (!text) return {};
+          try {
+            return JSON.parse(text) as {
+              ok?: boolean;
+              data?: {
+                operations?: unknown;
+                weatherSource?: string;
+                weatherUsed?: WeatherValues;
+                latestSimulationSummary?: LatestSimulationSummary;
+                latestSimulationReplay?: LatestSimulationReplay;
+              };
+              error?: {
+                type?: string;
+                message?: string;
+                details?: string;
+              };
+              operations?: unknown;
+              weatherSource?: string;
+              weatherUsed?: WeatherValues;
+              latestSimulationSummary?: LatestSimulationSummary;
+              latestSimulationReplay?: LatestSimulationReplay;
+              code?: string;
+              details?: string;
+              hint?: string;
+            };
+          } catch {
+            return { error: text };
+          }
+        })(raw);
+        if (!res.ok) {
+          const envelopeError =
+            typeof json.error === "object" && json.error
+              ? {
+                  code: json.error.type,
+                  error: json.error.message,
+                  details: json.error.details,
+                }
+              : undefined;
+          throw new Error(
+            formatSimulationRunFailureMessage(res.status, {
+              code: envelopeError?.code ?? json.code,
+              error:
+                envelopeError?.error ??
+                (typeof json.error === "string" ? json.error : undefined),
+              details: envelopeError?.details ?? json.details,
+              hint: json.hint,
+            }),
+          );
+        }
+        const payload = json.ok ? json.data ?? {} : json;
+        const typedJson = payload as {
           error?: string;
           operations?: unknown;
           weatherSource?: string;
           weatherUsed?: WeatherValues;
-          cellResolution?: number;
-          cellSpaceDimension?: number;
-          cellSpaceDimensionLat?: number;
-          projCenterLat?: number;
-          projCenterLng?: number;
+          latestSimulationSummary?: LatestSimulationSummary;
+          latestSimulationReplay?: LatestSimulationReplay;
         };
-        if (!res.ok) {
-          throw new Error(json.error ?? `Simulation failed (${res.status})`);
-        }
-        if (json.weatherUsed) {
-          const merged = mergeWeather(json.weatherUsed, weatherOverridesRef.current);
+        if (typedJson.weatherUsed) {
+          const merged = mergeWeather(typedJson.weatherUsed, weatherOverridesRef.current);
           setProjectConfig((prev) => ({
             ...prev,
             windSpeed: merged.windSpeed,
@@ -433,32 +493,18 @@ export function ProjectWorkspace({
             humidity: merged.humidity,
           }));
         }
-        const overlay = normalizeOverlay(json.operations);
-        const snap: LastSimulationSnapshot = {
-          overlay,
-          perimeterGeoJSON: null,
-          gridMeta:
-            typeof json.cellResolution === "number" &&
-            typeof json.cellSpaceDimension === "number" &&
-            typeof json.cellSpaceDimensionLat === "number" &&
-            typeof json.projCenterLat === "number" &&
-            typeof json.projCenterLng === "number"
-              ? {
-                  cellResolution: json.cellResolution,
-                  cellSpaceDimension: json.cellSpaceDimension,
-                  cellSpaceDimensionLat: json.cellSpaceDimensionLat,
-                  projCenterLat: json.projCenterLat,
-                  projCenterLng: json.projCenterLng,
-                }
-              : undefined,
-          weatherSource: json.weatherSource ?? "dynamic",
-          completedAt: new Date().toISOString(),
-        };
-        setLastSimulationSnapshot(snap);
+        const fallbackOverlay = normalizeOverlay(typedJson.operations);
+        const replay = typedJson.latestSimulationReplay ?? null;
+        const summary = typedJson.latestSimulationSummary ?? replay?.summary ?? null;
+        setLatestSimulationReplay(replay);
+        setLatestSimulationSummary(summary);
         setSimulationRun({
           status: "ready",
           error: null,
-          weatherSource: json.weatherSource,
+          weatherSource: typedJson.weatherSource,
+        });
+        toast.success("Simulation is ready.", {
+          id: "simulation-status",
         });
         readyBadgeTimerRef.current = setTimeout(() => {
           setSimulationRun((prev) =>
@@ -468,7 +514,8 @@ export function ProjectWorkspace({
         }, 5000);
         setReplayState("idle");
         setReplayCursor(null);
-        if (autoReplayAfterRunRef.current && overlay.length > 0) {
+        const replayOverlay = replay?.overlay ?? fallbackOverlay;
+        if (autoReplayAfterRunRef.current && replayOverlay.length > 0) {
           setAutoReplayAfterRun(false);
           setReplayCursor(0);
           setReplayFrame([]);
@@ -480,6 +527,9 @@ export function ProjectWorkspace({
         const msg = e instanceof Error ? e.message : String(e);
         setSimulationRun({ status: "error", error: msg });
         setAutoReplayAfterRun(false);
+        toast.error(`Simulation failed: ${msg}`, {
+          id: "simulation-status",
+        });
       }
     },
     [
@@ -488,15 +538,46 @@ export function ProjectWorkspace({
       weatherOverrides,
       simulationRun.status,
       stopReplayAnimation,
+      projectId,
     ],
   );
 
+  const ensureLatestReplayLoaded = useCallback(async () => {
+    if (latestSimulationReplay) {
+      return latestSimulationReplay;
+    }
+    if (!latestSimulationSummary) {
+      return null;
+    }
+    const res = await fetch(`/api/project/${projectId}/simulation/latest`, {
+      cache: "no-store",
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      latestSimulationReplay?: LatestSimulationReplay;
+    };
+    if (!res.ok || !json.latestSimulationReplay) {
+      throw new Error(json.error ?? "Failed to load latest simulation replay.");
+    }
+    setLatestSimulationReplay(json.latestSimulationReplay);
+    return json.latestSimulationReplay;
+  }, [latestSimulationReplay, latestSimulationSummary, projectId]);
+
   const handleReplay = useCallback(() => {
-    if (!lastSimulationSnapshot) return;
-    setReplayCursor(0);
-    setReplayFrame([]);
-    setReplayState("playing");
-  }, [lastSimulationSnapshot]);
+    void (async () => {
+      try {
+        const replay = await ensureLatestReplayLoaded();
+        if (!replay) return;
+        replayCursorRef.current = 0;
+        setReplayCursor(0);
+        setReplayFrame([]);
+        setReplayState("playing");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to start replay.";
+        toast.error(message);
+      }
+    })();
+  }, [ensureLatestReplayLoaded]);
 
   const handlePauseReplay = useCallback(() => {
     if (replayState !== "playing") return;
@@ -537,7 +618,7 @@ export function ProjectWorkspace({
           weather?: WeatherValues;
           workflowMode?: ProjectWorkflowMode;
           ownerSlug?: string;
-          lastSimulation?: LastSimulationSnapshot | null;
+          latestSimulationSummary?: LatestSimulationSummary | null;
           agentChatMessages?: unknown;
           agentChatIntroDone?: boolean;
         };
@@ -551,7 +632,7 @@ export function ProjectWorkspace({
         skipSaveAfterLoadRef.current = true;
         if (data.title) setProjectTitle(data.title);
         if (data.plan) {
-          const loadedPlan = ensurePlanBoundary(data.plan);
+          const loadedPlan = ensurePlanBoundary(normalizeIgnitionPlan(data.plan));
           if (data.weather) {
             const loadedWeather = { ...DEFAULT_WEATHER, ...data.weather };
             loadedPlan.windSpeed = loadedWeather.windSpeed;
@@ -561,7 +642,8 @@ export function ProjectWorkspace({
           }
           setProjectConfig(loadedPlan);
         }
-        setLastSimulationSnapshot(data.lastSimulation ?? null);
+        setLatestSimulationSummary(data.latestSimulationSummary ?? null);
+        setLatestSimulationReplay(null);
 
         const rawChat = data.agentChatMessages;
         const loadedMessages = Array.isArray(rawChat)
@@ -575,7 +657,9 @@ export function ProjectWorkspace({
           });
           const initialPayload = JSON.stringify({
             title: data.title ?? projectTitle,
-            plan: data.plan ? ensurePlanBoundary(data.plan) : projectConfig,
+            plan: data.plan
+              ? ensurePlanBoundary(normalizeIgnitionPlan(data.plan))
+              : projectConfig,
             weather: data.weather
               ? mergeWeather(
                   { ...DEFAULT_WEATHER, ...data.weather },
@@ -583,7 +667,6 @@ export function ProjectWorkspace({
                 )
               : weather,
             workflowMode: data.workflowMode ?? null,
-            lastSimulation: data.lastSimulation ?? null,
             agentChatMessages: loadedMessages,
             agentChatIntroDone: Boolean(data.agentChatIntroDone),
           });
@@ -636,7 +719,6 @@ export function ProjectWorkspace({
       plan: projectConfig,
       weather,
       workflowMode,
-      lastSimulation: lastSimulationSnapshot,
       agentChatMessages: agentChatSnapshot.messages,
       agentChatIntroDone: agentChatSnapshot.introDone,
     };
@@ -676,7 +758,6 @@ export function ProjectWorkspace({
     projectTitle,
     projectId,
     workflowMode,
-    lastSimulationSnapshot,
     agentChatSnapshot,
   ]);
 
@@ -719,14 +800,14 @@ export function ProjectWorkspace({
     () => ({
       ...statsFromOverlay(effectiveOverlay),
       weatherSource:
-        lastSimulationSnapshot?.weatherSource ?? simulationRun.weatherSource,
+        latestSimulationSummary?.weatherSource ?? simulationRun.weatherSource,
       streamStatus: streamStatusForPanel,
       shapes: drawnShapes.length,
       simulationError: simulationRun.error,
     }),
     [
       effectiveOverlay,
-      lastSimulationSnapshot?.weatherSource,
+      latestSimulationSummary?.weatherSource,
       simulationRun.weatherSource,
       simulationRun.error,
       streamStatusForPanel,
@@ -820,7 +901,7 @@ export function ProjectWorkspace({
           return;
         }
 
-        if (lastSimulationSnapshot) {
+        if (latestSimulationSummary) {
           if (replayState === "paused") {
             handleResumeReplay();
           } else if (replayState !== "playing") {
@@ -850,7 +931,7 @@ export function ProjectWorkspace({
     [
       runSimulationFromTrigger,
       handlePauseReplay,
-      lastSimulationSnapshot,
+      latestSimulationSummary,
       replayState,
       handleResumeReplay,
       handleReplay,
@@ -973,7 +1054,8 @@ export function ProjectWorkspace({
       readyBadgeTimerRef.current = null;
     }
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
-    setLastSimulationSnapshot(null);
+    setLatestSimulationSummary(null);
+    setLatestSimulationReplay(null);
     stopReplayAnimation();
     setReplayFrame(null);
     setReplayState("idle");
@@ -1095,6 +1177,7 @@ export function ProjectWorkspace({
 
       if (Object.keys(residualPatch).length > 0) {
         workspaceStore.applyLoosePlanPatch(residualPatch);
+        workspaceStore.replacePlan((prev) => normalizeIgnitionPlan(prev));
       }
 
       // Fallback guard: if center coordinates are set but boundary is absent, synthesize one.
@@ -1199,7 +1282,8 @@ export function ProjectWorkspace({
     setWeatherOverrides({});
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
     setDrawnShapes([]);
-    setLastSimulationSnapshot(null);
+    setLatestSimulationSummary(null);
+    setLatestSimulationReplay(null);
     setLocationSearchPreview(null);
     setSimulationRun({ status: "idle", error: null });
     setAutoReplayAfterRun(false);
@@ -1216,7 +1300,6 @@ export function ProjectWorkspace({
       plan,
       weather: DEFAULT_WEATHER,
       workflowMode,
-      lastSimulation: null,
       agentChatMessages: [],
       agentChatIntroDone: nextIntroDone,
     };
@@ -1284,8 +1367,10 @@ export function ProjectWorkspace({
     [mapInteractionMode, projectConfig.boundaryGeoJSON],
   );
 
-  const hasProjectLocation = !!projectConfig.boundaryGeoJSON;
-  const hasSimulationResults = lastSimulationSnapshot !== null;
+  const hasProjectLocation =
+    !!projectConfig.boundaryGeoJSON ||
+    hasNonZeroCenter(projectConfig.proj_center_lat, projectConfig.proj_center_lng);
+  const hasSimulationResults = latestSimulationSummary !== null;
   const totalSegmentCount = projectConfig.team_infos.reduce(
     (n, team) => n + team.details.length,
     0,
@@ -1354,8 +1439,8 @@ export function ProjectWorkspace({
             end_x: e.x,
             end_y: e.y,
             speed: DEFAULT_IGNITION_SPEED_MPS,
-            mode: "continuous_static",
-            distance: DEFAULT_STATIC_SPACING_CELLS,
+            mode: "continuous",
+            distance: null,
           };
     pendingActionRef.current = null;
     setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
@@ -1434,8 +1519,8 @@ export function ProjectWorkspace({
           end_x: e.x,
           end_y: e.y,
           speed: DEFAULT_IGNITION_SPEED_MPS,
-          mode: "continuous_static",
-          distance: DEFAULT_STATIC_SPACING_CELLS,
+          mode: "continuous",
+          distance: null,
         };
         setProjectConfig((prev) => mergeActionIntoPlan(prev, payload));
       } else {
@@ -1565,6 +1650,7 @@ export function ProjectWorkspace({
       key={`${projectId}-${chatMountKey}`}
       projectId={projectId}
       mode={workflowMode}
+      autoStartGuidedNonce={guidedAutoStartNonce}
       planSnapshot={projectConfig}
       initialMessages={agentChatSnapshot.messages}
       introDoneServer={agentChatSnapshot.introDone}
@@ -1575,10 +1661,6 @@ export function ProjectWorkspace({
         messages,
         sendMessage,
         status,
-        showStarterPrompt,
-        starterPromptText,
-        sendStarterPrompt,
-        dismissStarterPrompt,
       }) => (
     <WorkspaceModalHost
       activeWorkspaceAction={activeWorkspaceAction}
@@ -1620,9 +1702,7 @@ export function ProjectWorkspace({
         <WorkflowModeBanner
           onGuideMeViaChat={() => {
             workspaceStore.setMode("chat");
-            if (showStarterPrompt) {
-              void sendStarterPrompt();
-            }
+            setGuidedAutoStartNonce((n) => n + 1);
           }}
           onManualMode={() => workspaceStore.setMode("manual")}
           onDismiss={() => workspaceStore.setMode("manual")}
@@ -1710,7 +1790,7 @@ export function ProjectWorkspace({
           runActionsEnabled={runActionsEnabled}
           simulationRunning={simulationRun.status === "running"}
           hasProjectLocation={hasProjectLocation}
-          hasSimulationResults={!!lastSimulationSnapshot}
+          hasSimulationResults={!!latestSimulationSummary}
           planPreview={{
             segments: totalSegmentCount,
             fuelBreaks: projectConfig.sup_num,
@@ -1742,22 +1822,22 @@ export function ProjectWorkspace({
             terrainShow={terrainState.show}
             showCellInfo={terrainState.showCellInfo}
             cellResolution={
-              lastSimulationSnapshot?.gridMeta?.cellResolution ?? projectConfig.cellResolution
+              latestSimulationSummary?.gridMeta?.cellResolution ?? projectConfig.cellResolution
             }
             cellSpaceDimension={
-              lastSimulationSnapshot?.gridMeta?.cellSpaceDimension ??
+              latestSimulationSummary?.gridMeta?.cellSpaceDimension ??
               projectConfig.cellSpaceDimension
             }
             cellSpaceDimensionLat={
-              lastSimulationSnapshot?.gridMeta?.cellSpaceDimensionLat ??
+              latestSimulationSummary?.gridMeta?.cellSpaceDimensionLat ??
               projectConfig.cellSpaceDimensionLat
             }
             projCenterLat={
-              lastSimulationSnapshot?.gridMeta?.projCenterLat ??
+              latestSimulationSummary?.gridMeta?.projCenterLat ??
               projectConfig.proj_center_lat
             }
             projCenterLng={
-              lastSimulationSnapshot?.gridMeta?.projCenterLng ??
+              latestSimulationSummary?.gridMeta?.projCenterLng ??
               projectConfig.proj_center_lng
             }
             scenarioPlan={projectConfig}
@@ -1770,6 +1850,7 @@ export function ProjectWorkspace({
             layout="map-utilities"
             stats={panelStats}
             weather={weather}
+            hasProjectLocation={hasProjectLocation}
             mapStyle={mapStyle}
             onMapStyleChange={setMapStyle}
             mapRef={mapRef}
@@ -1805,10 +1886,6 @@ export function ProjectWorkspace({
               onUpdatePlanPatch={handleUpdatePlanPatch}
               onRunTrigger={handleRunTrigger}
               onAgentCommand={handleAgentCommand}
-              showStarterPrompt={showStarterPrompt}
-              starterPromptText={starterPromptText}
-              onSendStarterPrompt={sendStarterPrompt}
-              onDismissStarterPrompt={dismissStarterPrompt}
             />
           </div>
         </div>
@@ -1838,9 +1915,11 @@ export function ProjectWorkspace({
         playbackRate={playbackRate}
         onPlaybackRateChange={setPlaybackRate}
         replayState={replayState}
-        canReplay={Boolean(lastSimulationSnapshot)}
+        canReplay={Boolean(latestSimulationSummary)}
+        replayCursor={replayCursor}
+        replayMaxTime={replayMaxTime}
         onReplayPlay={() => {
-          if (!lastSimulationSnapshot) return;
+          if (!latestSimulationSummary) return;
           if (replayState === "paused") {
             handleResumeReplay();
           } else {
