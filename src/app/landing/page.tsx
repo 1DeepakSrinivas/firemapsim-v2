@@ -44,16 +44,48 @@ const keyFeatures = [
   },
 ];
 
-const techStack = [
-  "Next.js 16 App Router",
-  "React 19",
-  "TypeScript",
-  "Tailwind CSS v4",
-  "Clerk authentication",
-  "Leaflet + React Leaflet",
-  "Mastra agents",
-  "Vercel AI SDK",
-  "Supabase",
+type TechStackIcon = { src: string; label: string };
+
+const techStackGroups: { title: string; description: string; items: TechStackIcon[] }[] = [
+  {
+    title: "Full Stack",
+    description:
+      "Languages, runtime, UI framework, docs, auth, maps, persistence, and agent wiring used by the app.",
+    items: [
+      { src: "/icons/typescript.svg", label: "TypeScript" },
+      { src: "/icons/bun.svg", label: "Bun" },
+      { src: "/icons/react.svg", label: "React" },
+      { src: "/icons/next.svg", label: "Next" },
+      { src: "/icons/nextjs.svg", label: "Next.js" },
+      { src: "/icons/nextra.svg", label: "Nextra" },
+      { src: "/icons/tailwind.svg", label: "Tailwind CSS" },
+      { src: "/icons/clerk.svg", label: "Clerk" },
+      { src: "/icons/leaflet.svg", label: "Leaflet" },
+      { src: "/icons/postgresql.svg", label: "PostgreSQL" },
+      { src: "/icons/python.svg", label: "Python" },
+      { src: "/icons/mastra.svg", label: "Mastra" },
+      { src: "/icons/mcp.svg", label: "MCP" },
+      { src: "/icons/fastmcp.svg", label: "FastMCP" },
+    ],
+  },
+  {
+    title: "AI and Dev Tools",
+    description: "Model providers, coding assistants, and the editor environment used for development.",
+    items: [
+      { src: "/icons/claude.svg", label: "Claude" },
+      { src: "/icons/claudecode.svg", label: "Claude Code" },
+      { src: "/icons/qwen.svg", label: "Qwen" },
+      { src: "/icons/cursor.svg", label: "Cursor" },
+    ],
+  },
+  {
+    title: "Cloud and Hosting",
+    description: "Inference routing and deployment targets for the production app.",
+    items: [
+      { src: "/icons/openrouter.svg", label: "OpenRouter" },
+      { src: "/icons/vercel.svg", label: "Vercel" },
+    ],
+  },
 ];
 
 const agenticFeatures = [
@@ -243,14 +275,29 @@ export function LandingPageView() {
             title="Implemented with the stack already present in the project"
             description="This section stays factual and brief, naming the core technologies that support authentication, mapping, agents, and persistence."
           />
-          <div className="mt-8 flex flex-wrap gap-3">
-            {techStack.map((item) => (
-              <span
-                key={item}
-                className="rounded-full border border-border bg-card px-4 py-2 text-sm text-muted-foreground"
-              >
-                {item}
-              </span>
+          <div className="mt-10 space-y-10">
+            {techStackGroups.map((group) => (
+              <div key={group.title}>
+                <h3 className="text-base font-semibold tracking-tight text-foreground">{group.title}</h3>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{group.description}</p>
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                  {group.items.map(({ src, label }) => (
+                    <div
+                      key={src}
+                      className="flex items-center gap-3 rounded-2xl border border-muted-foreground/20 bg-muted px-3 py-3 shadow-sm dark:border-muted-foreground/35"
+                    >
+                      <Image
+                        src={src}
+                        alt={`${label} icon`}
+                        width={32}
+                        height={32}
+                        className="h-8 w-8 shrink-0 object-contain"
+                      />
+                      <p className="min-w-0 text-sm font-medium leading-tight text-foreground">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>
