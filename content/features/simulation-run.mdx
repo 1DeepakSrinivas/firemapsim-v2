@@ -1,0 +1,33 @@
+---
+title: Simulation Run
+description: Configure timesteps, run preconditions, and launch execution.
+---
+
+## What this feature does
+
+Run controls launch simulation execution for the current project scenario state.
+
+## Inputs
+
+- simulation timesteps (duration proxy),
+- current scenario plan (location/grid/weather/ignitions/fuel breaks).
+
+## Preconditions
+
+Run launch requires:
+
+- valid project location,
+- at least one ignition segment,
+- valid run payload.
+
+## Start behavior
+
+When run starts:
+
+- UI indicates processing state,
+- simulation actions are temporarily constrained,
+- success yields replay-ready output.
+
+## If run fails
+
+See [Troubleshooting](/docs/troubleshooting#simulation-run-fails-immediately).
