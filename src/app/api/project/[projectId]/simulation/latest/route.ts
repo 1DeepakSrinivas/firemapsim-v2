@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  readLatestSimulationReplay,
   toLegacyOverlaySummary,
 } from "@/lib/latestSimulationStore";
 import { supabase } from "@/lib/supabase";
@@ -52,7 +51,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const { data: project, error: projectErr } = await supabase
     .from("map_projects")
-    .select("user_id, plan")
+    .select("user_id, plan, last_simulation")
     .eq("id", projectId)
     .maybeSingle();
 
@@ -60,18 +59,8 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const replay = await readLatestSimulationReplay(projectId);
-  if (replay) {
-    return NextResponse.json({ latestSimulationReplay: replay });
-  }
-
-  const { data: legacyData } = await supabase
-    .from("map_projects")
-    .select("last_simulation")
-    .eq("id", projectId)
-    .maybeSingle();
   const legacyParsed = legacySnapshotSchema.safeParse(
-    (legacyData as { last_simulation?: unknown } | null)?.last_simulation,
+    (project as { last_simulation?: unknown } | null)?.last_simulation,
   );
   if (!legacyParsed.success) {
     return NextResponse.json(

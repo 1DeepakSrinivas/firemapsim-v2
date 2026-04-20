@@ -70,7 +70,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const thread = body.threadId ?? `thread-${crypto.randomUUID()}`;
     const mode = body.mode === "manual" || body.mode === "chat" ? body.mode : null;
     const planSnapshot = body.planSnapshot ?? null;
 
@@ -93,10 +92,6 @@ export async function POST(request: NextRequest) {
         trigger: parseChatTrigger(body.trigger),
       },
       defaultOptions: {
-        memory: {
-          thread,
-          resource: userId,
-        },
         system: runtimeContextSystem,
       },
     });
