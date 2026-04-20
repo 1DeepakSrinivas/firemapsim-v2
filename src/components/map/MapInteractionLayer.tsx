@@ -309,17 +309,18 @@ export function MapInteractionLayer({
         polylinePreviewRef.current = null;
       }
 
-      function handlePolylineEscape(e: KeyboardEvent) {
-        if (mode !== "polyline") return;
+      function handleEscape(e: KeyboardEvent) {
         if (e.key !== "Escape") return;
         e.preventDefault();
-        const nodes = polylineNodesRef.current;
-        if (nodes.length >= 2) {
-          handlePolylineDblClick();
-        } else {
-          clearAll();
-          onCancel?.();
+        if (mode === "polyline") {
+          const nodes = polylineNodesRef.current;
+          if (nodes.length >= 2) {
+            handlePolylineDblClick();
+            return;
+          }
         }
+        clearAll();
+        onCancel?.();
       }
 
       // ── Rect mode ─────────────────────────────────────────────────────────
@@ -412,7 +413,6 @@ export function MapInteractionLayer({
         map.on("click", handlePolylineClick);
         map.on("mousemove", handlePolylineMouseMove);
         map.doubleClickZoom.disable();
-        window.addEventListener("keydown", handlePolylineEscape);
       } else if (mode === "rect") {
         map.on("click", handleRectClick);
         map.on("mousemove", handleRectMouseMove);
@@ -420,6 +420,7 @@ export function MapInteractionLayer({
         map.on("mousemove", handlePlaceSquareMouseMove);
         map.on("click", handlePlaceSquareClick);
       }
+      window.addEventListener("keydown", handleEscape);
 
       return () => {
         map.off("click", handlePinClick);
@@ -431,7 +432,7 @@ export function MapInteractionLayer({
         map.off("click", handlePolylineClick);
         map.off("mousemove", handlePolylineMouseMove);
         map.off("dblclick", handlePolylineDblClick);
-        window.removeEventListener("keydown", handlePolylineEscape);
+        window.removeEventListener("keydown", handleEscape);
         map.doubleClickZoom.enable();
         map.off("click", handleRectClick);
         map.off("mousemove", handleRectMouseMove);
