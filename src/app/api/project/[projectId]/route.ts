@@ -9,7 +9,6 @@ import {
   replaceProjectChatMessages,
 } from "@/lib/projectChatStore";
 import {
-  readLatestSimulationSummary,
   toLegacyOverlaySummary,
 } from "@/lib/latestSimulationStore";
 import { sanitizeLastSimulationForDb } from "@/lib/projectPersistence";
@@ -329,12 +328,7 @@ export async function GET(_request: Request, context: RouteContext) {
     }
   }
   let latestSimulationSummary: LatestSimulationSummary | null = null;
-  try {
-    latestSimulationSummary = await readLatestSimulationSummary(projectId);
-  } catch {
-    latestSimulationSummary = null;
-  }
-  if (!latestSimulationSummary && lastSimulation) {
+  if (lastSimulation) {
     const plan = coercePlan(project.plan);
     latestSimulationSummary = toLegacyOverlaySummary(
       lastSimulation.overlay,

@@ -2,8 +2,16 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { PerimeterGeoJSON } from "@/components/map/types";
+import { sanitizeLastSimulationForDb } from "@/lib/projectPersistence";
 import { buildStats } from "@/lib/simulationOverlay";
 import { supabase } from "@/lib/supabase";
+import {
+  defaultIgnitionPlan,
+  normalizeIgnitionPlan,
+  type IgnitionPlan,
+} from "@/types/ignitionPlan";
+import type { LastSimulationSnapshot } from "@/types/lastSimulation";
 import type {
   LatestSimulationFinalMetrics,
   LatestSimulationGridMeta,
@@ -96,6 +104,14 @@ const replaySchema = z.object({
   finalMetrics: finalMetricsSchema,
 });
 
+const legacySnapshotSchema = z.object({
+  overlay: z.array(fireOverlayPointSchema),
+  perimeterGeoJSON: z.unknown().nullable().optional(),
+  weatherSource: z.string().optional(),
+  completedAt: z.string(),
+  gridMeta: gridMetaSchema.optional(),
+});
+
 const MAX_OVERLAY_PREVIEW_POINTS = 20_000;
 
 function thinOverlayForPreview(overlay: z.infer<typeof fireOverlayPointSchema>[]) {
@@ -155,20 +171,107 @@ export function buildLatestSimulationSummary(input: {
   };
 }
 
+type UpsertLatestSimulationResult = "ok" | "storage-unavailable";
+
+type LatestSimulationProjectRow = {
+  last_simulation?: unknown;
+  plan?: unknown;
+} | null;
+
+function asPlan(raw: unknown): IgnitionPlan {
+  if (!raw || typeof raw !== "object") {
+    return defaultIgnitionPlan();
+  }
+  return normalizeIgnitionPlan(raw);
+}
+
+function weatherFromPlan(plan: IgnitionPlan) {
+  return {
+    windSpeed: plan.windSpeed,
+    windDirection: plan.windDegree,
+    temperature: plan.temperature ?? 72,
+    humidity: plan.humidity ?? 38,
+  };
+}
+
+function gridMetaFromPlan(plan: IgnitionPlan): LatestSimulationGridMeta {
+  return {
+    cellResolution: plan.cellResolution,
+    cellSpaceDimension: plan.cellSpaceDimension,
+    cellSpaceDimensionLat: plan.cellSpaceDimensionLat,
+    projCenterLat: plan.proj_center_lat,
+    projCenterLng: plan.proj_center_lng,
+  };
+}
+
+function buildReplayFromLastSimulation(params: {
+  projectId: string;
+  plan: IgnitionPlan;
+  snapshot: z.infer<typeof legacySnapshotSchema>;
+}): LatestSimulationReplay {
+  const gridMeta = params.snapshot.gridMeta ?? gridMetaFromPlan(params.plan);
+  const summary = toLegacyOverlaySummary(
+    params.snapshot.overlay,
+    params.snapshot.completedAt,
+    params.snapshot.weatherSource,
+    gridMeta,
+  );
+  const weather = weatherFromPlan(params.plan);
+
+  return {
+    summary,
+    manifest: {
+      startedAt: params.snapshot.completedAt,
+      completedAt: params.snapshot.completedAt,
+      baseUrl: "legacy",
+      projectId: params.projectId,
+      terrainMode: "online",
+      weatherMode: "static",
+      planSnapshot: params.plan,
+      weatherFetched: weather,
+      weatherUsed: weather,
+      weatherOverrideApplied: [],
+      setupCalls: [],
+      executionCalls: [],
+    },
+    operations: params.snapshot.overlay.map((point) => ({
+      x: point.x,
+      y: point.y,
+      time: point.time,
+      Operation: point.state,
+    })),
+    overlay: params.snapshot.overlay,
+    perimeterGeoJSON: (params.snapshot.perimeterGeoJSON ??
+      null) as PerimeterGeoJSON,
+    finalMetrics: {
+      perimeterCells: [],
+      burnedArea: null,
+      perimeterLength: null,
+      burningCells: null,
+      unburnedCells: null,
+    },
+  };
+}
+
 export async function upsertLatestSimulation(params: {
   projectId: string;
   summary: LatestSimulationSummary;
   replay: LatestSimulationReplay;
-}): Promise<"ok" | "storage-unavailable"> {
-  const { error } = await supabase.from("project_latest_simulations").upsert(
+}): Promise<UpsertLatestSimulationResult> {
+  const snapshot = sanitizeLastSimulationForDb({
+    overlay: params.replay.overlay,
+    perimeterGeoJSON: params.replay.perimeterGeoJSON,
+    gridMeta: params.summary.gridMeta,
+    weatherSource: params.summary.weatherSource,
+    completedAt: params.summary.completedAt,
+  } satisfies LastSimulationSnapshot);
+
+  const { error } = await supabase.from("map_projects").update(
     {
-      project_id: params.projectId,
-      summary_json: params.summary,
-      replay_json: params.replay,
+      last_simulation: snapshot,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "project_id" },
-  );
+  ).eq("id", params.projectId);
 
   if (!error) {
     return "ok";
@@ -183,9 +286,9 @@ export async function readLatestSimulationSummary(
   projectId: string,
 ): Promise<LatestSimulationSummary | null> {
   const { data, error } = await supabase
-    .from("project_latest_simulations")
-    .select("summary_json")
-    .eq("project_id", projectId)
+    .from("map_projects")
+    .select("last_simulation, plan")
+    .eq("id", projectId)
     .maybeSingle();
 
   if (error) {
@@ -195,22 +298,33 @@ export async function readLatestSimulationSummary(
     throw new Error(error.message);
   }
 
-  const parsed = summarySchema.safeParse(
-    (data as { summary_json?: unknown } | null)?.summary_json,
-  );
-  if (!parsed.success) {
+  const row = data as LatestSimulationProjectRow;
+  if (!row) {
     return null;
   }
-  return parsed.data;
+
+  const parsedSnapshot = legacySnapshotSchema.safeParse(row.last_simulation);
+  if (!parsedSnapshot.success) {
+    return null;
+  }
+
+  const plan = asPlan(row.plan);
+  const gridMeta = parsedSnapshot.data.gridMeta ?? gridMetaFromPlan(plan);
+  return toLegacyOverlaySummary(
+    parsedSnapshot.data.overlay,
+    parsedSnapshot.data.completedAt,
+    parsedSnapshot.data.weatherSource,
+    gridMeta,
+  );
 }
 
 export async function readLatestSimulationReplay(
   projectId: string,
 ): Promise<LatestSimulationReplay | null> {
   const { data, error } = await supabase
-    .from("project_latest_simulations")
-    .select("replay_json")
-    .eq("project_id", projectId)
+    .from("map_projects")
+    .select("last_simulation, plan")
+    .eq("id", projectId)
     .maybeSingle();
 
   if (error) {
@@ -220,14 +334,27 @@ export async function readLatestSimulationReplay(
     throw new Error(error.message);
   }
 
-  const parsed = replaySchema.safeParse(
-    (data as { replay_json?: unknown } | null)?.replay_json,
-  );
-  if (!parsed.success) {
+  const row = data as LatestSimulationProjectRow;
+  if (!row) {
     return null;
   }
 
-  return parsed.data as LatestSimulationReplay;
+  const parsedSnapshot = legacySnapshotSchema.safeParse(row.last_simulation);
+  if (!parsedSnapshot.success) {
+    return null;
+  }
+
+  const replay = buildReplayFromLastSimulation({
+    projectId,
+    plan: asPlan(row.plan),
+    snapshot: parsedSnapshot.data,
+  });
+  const parsedReplay = replaySchema.safeParse(replay);
+  if (!parsedReplay.success) {
+    return null;
+  }
+
+  return parsedReplay.data as LatestSimulationReplay;
 }
 
 export function toLegacyOverlaySummary(

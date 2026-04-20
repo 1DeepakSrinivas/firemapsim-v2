@@ -1,5 +1,4 @@
 import { Agent } from "@mastra/core/agent";
-import { Memory } from "@mastra/memory";
 
 import { getFireSimModel } from "../llm/openrouter";
 import {
@@ -96,11 +95,6 @@ export function createFireSimAgent() {
     name: "Fire Simulation Planner",
     description:
       "Guides setup for wildfire simulations and syncs confirmed values to the shared frontend plan.",
-    memory: new Memory({
-      options: {
-        lastMessages: 40,
-      },
-    }),
     instructions: SYSTEM_PROMPT,
     model: getFireSimModel(),
     tools: {
