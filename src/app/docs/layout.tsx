@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Layout, Navbar } from "nextra-theme-docs";
-import { Head } from "nextra/components";
 import { getPageMap } from "nextra/page-map";
 import { House, LayoutDashboard } from "lucide-react";
 import { DocsNavbarAuth } from "@/components/docs/DocsNavbarAuth";
@@ -89,7 +88,6 @@ export default async function DocsLayout({
 
   return (
     <>
-      <Head />
       <style>{`
         html {
           scrollbar-gutter: stable;

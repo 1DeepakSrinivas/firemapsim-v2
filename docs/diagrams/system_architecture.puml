@@ -1,39 +1,89 @@
 @startuml
-!theme toy
+title FireMapSim-v2 — System Architecture (current)
 
-package "Frontend (Next.js Client)" {
-    [Map Workspace (Leaflet/Konva)] as Map
-    [Chat Interface (Mastra Client)] as Chat
-    [Project Dashboard] as Dashboard
-    [State Manager (React Context)] as State
+hide stereotype
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+
+package "Client (Browser)" {
+  [Next.js App Router\nClient Components] as Client
+  [Project Workspace UI\n(Leaflet map + panels)] as WorkspaceUI
+  [Agent Chat UI\n(@ai-sdk/react useChat\n+ CedarCaptionChat)] as ChatUI
+  [Workspace Store\n(useSyncExternalStore)\nplan + workflowMode] as Store
+  [Replay UI\n(latestSimulationReplay)] as ReplayUI
+  [Docs UI\n(Nextra theme-docs)] as DocsUI
 }
 
-package "Agentic AI Layer" {
-    [Mastra Agent (Fire Simulation Planner)] as Agent
-    [LLM (OpenRouter/Qwen 3.5)] as LLM
-    [Memory System (LibSQL)] as Memory
+package "App Server (Next.js Route Handlers — nodejs runtime)" {
+  [Middleware\n(Clerk protect routes)] as Middleware
+  [Agent API\nPOST /api/agent\n(Mastra handleChatStream)] as AgentAPI
+  [Project APIs\n/api/projects\n/api/project/:id\n/chat-intro] as ProjectAPI
+  [Weather API\nGET /api/weather/zip\n(Open-Meteo + Nominatim)] as WeatherAPI
+  [Simulation APIs\nPOST /api/simulation/run\nPOST /api/simulation/delegate-run\nGET /api/simulation/stream] as SimAPI
+  [DEVS-FIRE APIs\n/api/devs-fire/*\n(enveloped route handlers)] as DevsFireAPI
 }
 
-package "Backend Services (Next.js API)" {
-    [Weather Service] as WeatherAPI
-    [DEVS-FIRE Proxy] as FireProxy
-    [Project API] as ProjectAPI
+package "Agentic AI Layer (Mastra)" {
+  [fireSimAgent\n(Fire Simulation Planner)] as FireAgent
+  [simulateWorkflow\n(resolve area → weather → run)] as SimWorkflow
+  [Mastra Tools\nupdate-plan\nrun-simulation / playback-control / reset-project\ngeocodeAddress / fetchWeather / fetchParcelBoundary\n(devsFire tools used by workflow)] as MastraTools
+  [LLM via OpenRouter\n(model selected in code)] as LLM
+  [Mastra Memory\n(@mastra/memory\nlastMessages≈40)] as MastraMemory
 }
 
-package "External Systems" {
-    [DEVS-FIRE Simulation Engine] as Engine
-    [Weather Provider (OpenWeatherMap)] as WeatherData
-    [Supabase (DB & Auth)] as Supabase
+package "Persistence" {
+  [Supabase Postgres\nmap_projects, users,\nchat_messages, latest_simulation*] as Supabase
 }
 
-Chat <--> Component : "Prompts / JSON Streams"
-Chat --> Agent : "User Input"
-Agent <--> LLM : "Reasoning"
-Agent --> State : "Structured Setup Updates"
-Map <--> State : "Geo Features"
-Dashboard --> ProjectAPI : "Get/Save Projects"
-ProjectAPI <--> Supabase : "Persistence"
-FireProxy --> Engine : "Trigger Simulation"
-WeatherAPI --> WeatherData : "Fetch Real-time Data"
+package "External Providers" {
+  [DEVS-FIRE Research Server\n(HTTP API)] as DevsFireServer
+  [Open-Meteo\n(current/hourly weather)] as OpenMeteo
+  [Nominatim (OSM)\n(geocode + reverse)] as Nominatim
+  [Overture Maps\n(parcel GeoJSON)] as Overture
+  [Overpass API\n(boundary fallback)] as Overpass
+}
 
+package "Auth" {
+  [Clerk Auth] as Clerk
+}
+
+' Client composition
+Client --> WorkspaceUI
+Client --> ChatUI
+WorkspaceUI <--> Store : plan + mode\n(subscribe + patch)
+WorkspaceUI --> ReplayUI
+Client --> DocsUI
+
+' Auth + routing
+Client --> Middleware : request
+Middleware --> Clerk : protect()\n(dashboard, projects,\nworkspace routes, APIs)
+
+' Agent flow
+ChatUI --> AgentAPI : messages[] +\n{ mode, planSnapshot, threadId }
+AgentAPI --> Clerk : auth() + currentUser()
+AgentAPI --> Supabase : upsertLocalUserFromClerk()
+AgentAPI --> FireAgent : handleChatStream()
+FireAgent --> MastraMemory : load/store thread context
+FireAgent --> LLM : reasoning + tool calls
+FireAgent --> MastraTools : update-plan / geocode / weather / commands
+MastraTools --> Nominatim : geocodeAddress
+MastraTools --> OpenMeteo : fetchWeather
+MastraTools --> Overture : fetchParcelBoundary (primary)
+MastraTools --> Overpass : fetchParcelBoundary (fallback)
+ChatUI --> Store : apply update-plan patch\n+ run/playback/reset commands
+
+' Project persistence
+WorkspaceUI --> ProjectAPI : GET /api/project/:id\n(Pull plan, mode, chat,\nlatest sim summary)
+WorkspaceUI --> ProjectAPI : PUT /api/project/:id\n(debounced save)
+ProjectAPI --> Supabase : read/write map_projects\n(+ chat_messages table when available)
+
+' Simulation execution
+WorkspaceUI --> SimAPI : POST /api/simulation/run\n(plan + weather overrides)
+SimAPI --> Supabase : verify project owner\n+ persist latest simulation
+SimAPI --> DevsFireServer : connect + configure\n(terrain/wind/ignitions)\n+ runSimulation
+SimAPI --> WorkspaceUI : operations + replay payload
+
+' Lower-level DEVS-FIRE proxy APIs (optional UI use)
+WorkspaceUI --> DevsFireAPI : /api/devs-fire/*\n(session cookie + envelope)
+DevsFireAPI --> DevsFireServer : HTTP calls
 @enduml
