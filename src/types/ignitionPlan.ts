@@ -121,6 +121,38 @@ function normalizeDistance(value: unknown): number | null {
   return parsed ?? null;
 }
 
+function isPointCoordinates(seg: {
+  start_x: number;
+  start_y: number;
+  end_x: number;
+  end_y: number;
+}): boolean {
+  return seg.start_x === seg.end_x && seg.start_y === seg.end_y;
+}
+
+export function normalizeLineIgnitionMode(
+  mode: string | null | undefined,
+): "continuous" | "spot" {
+  const normalized = (mode ?? "").trim().toLowerCase();
+  if (!normalized) return "continuous";
+  if (normalized.includes("point") || normalized.includes("spot")) return "spot";
+  return "continuous";
+}
+
+function normalizeLineIgnitionDistance(
+  mode: "continuous" | "spot",
+  distance: number | null | undefined,
+): number | null {
+  if (mode !== "spot") {
+    return null;
+  }
+  if (typeof distance === "number" && Number.isFinite(distance)) {
+    return distance;
+  }
+  // DEVS-FIRE docs: spot mode distance defaults to 0 when omitted.
+  return 0;
+}
+
 function normalizeSegment(raw: unknown): SegmentDetail | null {
   if (!isRecord(raw)) return null;
   const startX = coerceNumber(raw.start_x);
@@ -153,7 +185,18 @@ function normalizeTeam(raw: unknown, teamIndex: number): TeamInfo | null {
   const detailsRaw = Array.isArray(raw.details) ? raw.details : [];
   const details = detailsRaw
     .map((entry) => normalizeSegment(entry))
-    .filter((entry): entry is SegmentDetail => entry !== null);
+    .filter((entry): entry is SegmentDetail => entry !== null)
+    .map((entry) => {
+      if (isPointCoordinates(entry)) {
+        return entry;
+      }
+      const mode = normalizeLineIgnitionMode(entry.mode);
+      return {
+        ...entry,
+        mode,
+        distance: normalizeLineIgnitionDistance(mode, entry.distance),
+      };
+    });
   return {
     team_name:
       typeof raw.team_name === "string" && raw.team_name.trim() !== ""
@@ -288,40 +331,50 @@ function segmentLine(
   };
 }
 
-/** Ignition modes supported by DEVS-FIRE */
+/** Known ignition modes from API payloads + UI compatibility */
 export const IGNITION_MODES = [
-  { value: "continuous_static", label: "Continuous Static" },
-  { value: "continuous_dynamic", label: "Continuous Dynamic" },
+  { value: "continuous", label: "Continuous" },
+  { value: "spot", label: "Spot" },
   { value: "point_static", label: "Point Static" },
   { value: "point_dynamic", label: "Point Dynamic" },
-  { value: "spot", label: "Spot" },
+  { value: "continuous_static", label: "Continuous Static (Legacy)" },
+  { value: "continuous_dynamic", label: "Continuous Dynamic (Legacy)" },
 ] as const;
 
 export type IgnitionMode = (typeof IGNITION_MODES)[number]["value"];
 
-/** UI currently exposes all known modes for both point and line geometries. */
-export const LINE_IGNITION_MODES = IGNITION_MODES;
-export const POINT_IGNITION_MODES = IGNITION_MODES;
+export const LINE_IGNITION_MODES = [
+  { value: "continuous", label: "Continuous" },
+  { value: "spot", label: "Spot" },
+] as const;
 
-export function ignitionModesForSegmentGeometry(_isPoint: boolean) {
-  return IGNITION_MODES;
+export const POINT_IGNITION_MODES = [
+  { value: "point_static", label: "Point Static" },
+  { value: "point_dynamic", label: "Point Dynamic" },
+] as const;
+
+export function ignitionModesForSegmentGeometry(isPoint: boolean) {
+  return isPoint ? POINT_IGNITION_MODES : LINE_IGNITION_MODES;
 }
 
 export function ignitionModeForGeometry(
   mode: string,
-  _isPoint: boolean,
+  isPoint: boolean,
 ): string {
   const trimmed = mode.trim();
-  if (trimmed) return trimmed;
-  return "continuous_static";
+  if (isPoint) {
+    return trimmed || "point_static";
+  }
+  return normalizeLineIgnitionMode(trimmed);
 }
 
-export function ignitionModeOptionsForCurrent(mode: string) {
-  const current = ignitionModeForGeometry(mode, false);
-  if (IGNITION_MODES.some((entry) => entry.value === current)) {
-    return IGNITION_MODES;
+export function ignitionModeOptionsForCurrent(mode: string, isPoint: boolean) {
+  const current = ignitionModeForGeometry(mode, isPoint);
+  const options = ignitionModesForSegmentGeometry(isPoint);
+  if (options.some((entry) => entry.value === current)) {
+    return options;
   }
-  return [{ value: current, label: `${current} (Custom)` }, ...IGNITION_MODES];
+  return [{ value: current, label: `${current} (Custom)` }, ...options];
 }
 
 /** Team slots available in the ignition UI (Team 1 … Team 10 → indices 0–9). */
@@ -402,11 +455,20 @@ export function applySegmentEdit(plan: IgnitionPlan, edit: SegmentEdit): Ignitio
     if (ti !== edit.teamIndex) return team;
     const details = team.details.map((seg, si) => {
       if (si !== edit.segmentIndex) return seg;
-      return {
+      const nextSeg: SegmentDetail = {
         ...seg,
         ...(edit.speed !== undefined ? { speed: edit.speed } : {}),
         ...(edit.mode !== undefined ? { mode: edit.mode } : {}),
         ...(edit.distance !== undefined ? { distance: edit.distance } : {}),
+      };
+      if (isPointCoordinates(nextSeg)) {
+        return nextSeg;
+      }
+      const lineMode = normalizeLineIgnitionMode(nextSeg.mode);
+      return {
+        ...nextSeg,
+        mode: lineMode,
+        distance: normalizeLineIgnitionDistance(lineMode, nextSeg.distance),
       };
     });
     return {
@@ -501,8 +563,8 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
     }
     case "line-ignition": {
       const speed = payload.speed ?? 3;
-      const mode = payload.mode ?? "continuous_static";
-      const distance = payload.distance ?? (mode === "point_static" ? 5 : null);
+      const mode = normalizeLineIgnitionMode(payload.mode ?? "continuous");
+      const distance = normalizeLineIgnitionDistance(mode, payload.distance);
       const seg = segmentLine(
         payload.start_x,
         payload.start_y,

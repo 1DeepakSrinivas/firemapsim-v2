@@ -91,6 +91,7 @@ export function buildIgnitionDispatchCommands(plan: IgnitionPlan): {
       }
 
       const mapped = planSegmentToDynamicIgnition(seg);
+      const mode = mapIgnitionMode(seg.mode);
       const dynamicCommand: DynamicIgnitionCommand = {
         kind: "setDynamicIgnition",
         teamName: team.team_name,
@@ -99,10 +100,15 @@ export function buildIgnitionDispatchCommands(plan: IgnitionPlan): {
         x2: mapped.x2,
         y2: mapped.y2,
         speed: seg.speed,
-        mode: mapIgnitionMode(seg.mode),
+        mode,
       };
-      if (typeof seg.distance === "number" && Number.isFinite(seg.distance)) {
-        dynamicCommand.distance = seg.distance;
+      if (mode === "spot") {
+        if (typeof seg.distance === "number" && Number.isFinite(seg.distance)) {
+          dynamicCommand.distance = seg.distance;
+        } else {
+          // DEVS-FIRE docs: spot mode distance defaults to 0 when omitted.
+          dynamicCommand.distance = 0;
+        }
       }
       commands.push(dynamicCommand);
     }

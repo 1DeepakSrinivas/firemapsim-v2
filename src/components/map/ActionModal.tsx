@@ -1067,7 +1067,7 @@ function defaultManualValues(actionId: ActionId): Record<string, string> {
     } else if (f.key === "mode" && actionId === "point-ignition") {
       base[f.key] = "point_static";
     } else if (f.key === "mode" && actionId === "line-ignition") {
-      base[f.key] = "continuous_static";
+      base[f.key] = "continuous";
     } else if (f.key === "cellResolution") {
       base[f.key] = "30";
     } else if (f.key === "cellSpaceDimension") {

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  defaultIgnitionPlan,
   ignitionModeForGeometry,
   ignitionModeOptionsForCurrent,
+  mergeActionIntoPlan,
   normalizeIgnitionPlan,
 } from "@/types/ignitionPlan";
 
@@ -139,7 +141,7 @@ function buildApiSamplePlan() {
 }
 
 describe("normalizeIgnitionPlan", () => {
-  test("normalizes API-formatted payload and preserves modes", () => {
+  test("normalizes API-formatted payload and line mode semantics", () => {
     const normalized = normalizeIgnitionPlan(buildApiSamplePlan());
 
     expect(normalized.name).toBe("");
@@ -150,6 +152,9 @@ describe("normalizeIgnitionPlan", () => {
     expect(normalized.team_infos[1]?.details).toHaveLength(2);
     expect(normalized.team_infos[1]?.details[1]?.speed).toBe(0.9);
     expect(normalized.team_infos[1]?.details[1]?.mode).toBe("spot");
+    expect(normalized.team_infos[1]?.details[1]?.distance).toBe(0);
+    expect(normalized.team_infos[0]?.details[0]?.mode).toBe("continuous");
+    expect(normalized.team_infos[1]?.details[0]?.mode).toBe("continuous");
 
     const pointModes =
       normalized.team_infos[0]?.details
@@ -208,19 +213,82 @@ describe("normalizeIgnitionPlan", () => {
 });
 
 describe("ignition mode helpers", () => {
-  test("preserves API mode strings without geometry rewrites", () => {
-    expect(ignitionModeForGeometry("continuous_static", true)).toBe(
-      "continuous_static",
-    );
+  test("normalizes line modes to DEVS-FIRE dynamic semantics", () => {
+    expect(ignitionModeForGeometry("continuous_static", false)).toBe("continuous");
+    expect(ignitionModeForGeometry("point_dynamic", false)).toBe("spot");
     expect(ignitionModeForGeometry("spot", false)).toBe("spot");
+    expect(ignitionModeForGeometry("", false)).toBe("continuous");
+  });
+
+  test("keeps point mode semantics for point geometry", () => {
+    expect(ignitionModeForGeometry("point_dynamic", true)).toBe("point_dynamic");
+    expect(ignitionModeForGeometry("", true)).toBe("point_static");
     expect(ignitionModeForGeometry("custom_api_mode", true)).toBe(
       "custom_api_mode",
     );
   });
 
-  test("includes unknown mode as current selectable option", () => {
-    const options = ignitionModeOptionsForCurrent("custom_api_mode");
-    expect(options[0]?.value).toBe("custom_api_mode");
-    expect(options.some((entry) => entry.value === "continuous_static")).toBe(true);
+  test("normalizes unknown line mode to continuous while narrowing line options", () => {
+    const options = ignitionModeOptionsForCurrent("custom_api_mode", false);
+    expect(options[0]?.value).toBe("continuous");
+    expect(options.some((entry) => entry.value === "continuous")).toBe(true);
+    expect(options.some((entry) => entry.value === "spot")).toBe(true);
+    expect(options.some((entry) => entry.value === "continuous_static")).toBe(false);
+  });
+
+  test("point mode options stay point-oriented", () => {
+    const options = ignitionModeOptionsForCurrent("point_static", true);
+    expect(options.some((entry) => entry.value === "point_static")).toBe(true);
+    expect(options.some((entry) => entry.value === "point_dynamic")).toBe(true);
+    expect(options.some((entry) => entry.value === "continuous")).toBe(false);
+    expect(options.some((entry) => entry.value === "spot")).toBe(false);
+  });
+});
+
+describe("mergeActionIntoPlan line ignition defaults", () => {
+  test("defaults line ignitions to continuous mode with null distance", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "line-ignition",
+      start_x: 10,
+      start_y: 20,
+      end_x: 30,
+      end_y: 40,
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg?.mode).toBe("continuous");
+    expect(seg?.distance).toBeNull();
+  });
+
+  test("defaults spot-like line ignitions to distance 0", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "line-ignition",
+      start_x: 10,
+      start_y: 20,
+      end_x: 30,
+      end_y: 40,
+      mode: "point_static",
+      distance: null,
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg?.mode).toBe("spot");
+    expect(seg?.distance).toBe(0);
+  });
+
+  test("continuous line ignitions always clear distance payloads", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "line-ignition",
+      start_x: 10,
+      start_y: 20,
+      end_x: 30,
+      end_y: 40,
+      mode: "continuous_static",
+      distance: 9,
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg?.mode).toBe("continuous");
+    expect(seg?.distance).toBeNull();
   });
 });
