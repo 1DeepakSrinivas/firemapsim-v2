@@ -1,15 +1,89 @@
 @startuml
-actor User
-participant "Mastra Chat" as Chat
-participant "FireSim Agent (Qwen 3.5)" as Agent
-participant "Zod Parser" as Parser
-participant "Global UI State" as State
+title FireMapSim-v2 — UI ↔ Agent ↔ Plan Sync (current)
 
-User -> Chat : "Set location to Yosemite"
-Chat -> Agent : "Process Input"
-Agent -> Agent : "Generate Response + \n```setup-update```"
-Agent -> Chat : "Streaming JSON"
-Chat -> Parser : "Extract JSON"
-Parser -> State : "Update Project Area"
-State -> User : "Visual Feedback on Map"
+actor User
+
+box "Frontend (Next.js Client Components)" #EEF
+participant "CedarCaptionChat\n(UI chat + tool-output parser)" as Cedar
+participant "ProjectAgentChatHost\n(@ai-sdk/react useChat)" as Host
+participant "ProjectWorkspace\n(Workspace store + map UI)" as Workspace
+participant "ProjectWorkspaceStore\n(useSyncExternalStore)" as Store
+participant "Map Workspace\n(Leaflet + panels)" as Map
+end box
+
+box "App Server (Next.js Route Handlers)" #EFE
+participant "POST /api/agent\n(Mastra handleChatStream)" as ApiAgent
+participant "POST /api/simulation/run\n(DEVS-FIRE run + persist)" as ApiRun
+participant "PUT /api/project/:id\n(persist plan/chat)" as ApiProject
+end box
+
+box "Agentic AI Layer (Mastra)" #FFE
+participant "fireSimAgent\n(Fire Simulation Planner)" as Agent
+participant "Tools\nupdate-plan / run-simulation /\nplayback-control / reset-project /\ngeocodeAddress / fetchWeather" as Tools
+end box
+
+box "External + Data" #F9F9F9
+participant "Clerk Auth" as Clerk
+participant "Supabase (Postgres)" as Supabase
+participant "DEVS-FIRE Server" as DevsFire
+participant "Weather + Geo Providers\n(Open-Meteo, Nominatim,\nOverture/Overpass)" as WxGeo
+end box
+
+== Setup / Chat loop ==
+
+User -> Cedar : Type prompt\n(e.g. "Set location to Yosemite")
+Cedar -> Host : sendMessage(text)
+Host -> ApiAgent : POST messages[] +\n{ mode, planSnapshot, threadId }
+ApiAgent -> Clerk : auth.protect()\n+ currentUser()
+ApiAgent -> Supabase : upsertLocalUserFromClerk()
+ApiAgent -> Agent : handleChatStream(\nagentId="firesim-agent"\n+ system RUNTIME_CONTEXT )
+Agent -> Tools : (optional) geo-geocode-address
+Tools -> WxGeo : Geocode address/place
+Agent -> Tools : (optional) weather-fetch-weather
+Tools -> WxGeo : Fetch current/hourly weather
+Agent -> Tools : update-plan(patch)\n(no legacy fenced blocks)
+Tools --> Agent : { patch: {...} }
+Agent --> ApiAgent : stream UIMessage parts\n(includes tool outputs)
+ApiAgent --> Host : stream response
+Host --> Cedar : messages updated
+
+note over Cedar
+Parses tool outputs from assistant messages:
+- tool-update-plan / dynamic-tool(update-plan) => patch
+- run-simulation / playback-control / reset-project => commands
+(Legacy ```setup-update``` still supported but discouraged)
+end note
+
+Cedar -> Workspace : onUpdatePlanPatch(patch)
+Workspace -> Store : applyLoosePlanPatch(patch)\n+ normalizeIgnitionPlan()
+Store --> Map : subscribers re-render\n(boundary/ignitions/weather panels)
+Map --> User : Visual feedback\n(boundary, pins/lines, badges)
+
+== Agent-triggered commands ==
+
+alt Agent requests a run
+  Agent -> Tools : run-simulation({simulationTimesteps?})
+  Tools --> Agent : { action:"run-simulation", ... }
+  Cedar -> Workspace : onAgentCommand(run-simulation)
+  Workspace -> ApiRun : POST { projectId, plan, simulationHours,\nweatherOverrides }
+  ApiRun -> Clerk : auth.protect()
+  ApiRun -> Supabase : verify project owner\n+ upsert latest simulation
+  ApiRun -> DevsFire : connectToServer()\n+ set parameters/terrain\n+ set ignitions/fuel breaks\n+ runSimulation()
+  ApiRun --> Workspace : { operations, latestSimulationReplay,\nweatherUsed/weatherSource }
+  Workspace --> User : "Simulation ready"\n+ replay available
+else Agent controls replay
+  Agent -> Tools : playback-control(play|pause)
+  Cedar -> Workspace : onAgentCommand(playback-control)
+  Workspace --> User : replay play/pause
+else Agent requests reset
+  Agent -> Tools : reset-project()
+  Cedar -> Workspace : onAgentCommand(reset-project)
+  Workspace --> User : opens reset confirmation modal
+end
+
+== Background persistence (debounced) ==
+
+Workspace -> ApiProject : PUT persisted payload\n(title, plan, weather,\nworkflowMode, agentChatMessages)
+ApiProject -> Clerk : auth.protect()
+ApiProject -> Supabase : update map_projects\n(+ chat_messages table when present)
 @enduml
