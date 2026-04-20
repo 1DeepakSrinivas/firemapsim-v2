@@ -8,7 +8,6 @@ import {
   BookOpen,
   Check,
   Clock,
-  Flame,
   LayoutGrid,
   Loader2,
   Map,
@@ -23,6 +22,7 @@ import { toast } from "sonner";
 
 import { computeUrlSlugFromClerk } from "@/lib/url-slug";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
+import { LogoMarkIcon } from "@/components/brand/LogoMarkIcon";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -197,7 +197,7 @@ export default function DashboardPage() {
       <header className="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-stroke-secondary/40 bg-card/95 px-3 backdrop-blur-sm sm:h-12 sm:px-4">
         <div className="flex items-center gap-2 justify-self-center sm:gap-3">
           <div className="flex h-6 w-6 items-center justify-center rounded-md border border-stroke-primary/45 bg-primary/15 sm:h-7 sm:w-7 sm:rounded-lg">
-            <Flame className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
+            <LogoMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" alt="FireMapSim-v2" />
           </div>
           <span className="text-[10px] font-bold tracking-widest text-foreground/80 uppercase sm:text-xs">
             <span className="hidden sm:inline">FireMapSim-v2</span>
