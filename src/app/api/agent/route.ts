@@ -4,7 +4,7 @@ import { createUIMessageStreamResponse, type UIMessage } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import z from "zod";
 
-import { mastra } from "@/mastra";
+import { getMastra } from "@/mastra";
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
 
 const requestSchema = z
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     ].join("\n");
 
     const uiStream = await handleChatStream({
-      mastra,
+      mastra: getMastra(),
       agentId: "firesim-agent",
       version: "v6",
       params: {

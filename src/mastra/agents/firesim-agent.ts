@@ -90,24 +90,26 @@ Run/control commands:
 - Prefer tool calls to mutate state.
 `;
 
-export const fireSimAgent = new Agent({
-  id: "firesim-agent",
-  name: "Fire Simulation Planner",
-  description:
-    "Guides setup for wildfire simulations and syncs confirmed values to the shared frontend plan.",
-  memory: new Memory({
-    options: {
-      lastMessages: 40,
+export function createFireSimAgent() {
+  return new Agent({
+    id: "firesim-agent",
+    name: "Fire Simulation Planner",
+    description:
+      "Guides setup for wildfire simulations and syncs confirmed values to the shared frontend plan.",
+    memory: new Memory({
+      options: {
+        lastMessages: 40,
+      },
+    }),
+    instructions: SYSTEM_PROMPT,
+    model: getFireSimModel(),
+    tools: {
+      [updatePlanTool.id]: updatePlanTool,
+      [runSimulationCommandTool.id]: runSimulationCommandTool,
+      [playbackControlTool.id]: playbackControlTool,
+      [resetProjectTool.id]: resetProjectTool,
+      [geocodeAddress.id]: geocodeAddress,
+      [fetchWeather.id]: fetchWeather,
     },
-  }),
-  instructions: SYSTEM_PROMPT,
-  model: getFireSimModel(),
-  tools: {
-    [updatePlanTool.id]: updatePlanTool,
-    [runSimulationCommandTool.id]: runSimulationCommandTool,
-    [playbackControlTool.id]: playbackControlTool,
-    [resetProjectTool.id]: resetProjectTool,
-    [geocodeAddress.id]: geocodeAddress,
-    [fetchWeather.id]: fetchWeather,
-  },
-});
+  });
+}
