@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import z from "zod";
 
-import { devsFirePost, toErrorMessage } from "./_client";
+import { connectToDevsFire, toErrorMessage } from "./_client";
 
 const inputSchema = z.object({});
 const outputSchema = z.object({ token: z.string() });
@@ -13,15 +13,7 @@ export const connectToServer = createTool({
   outputSchema,
   execute: async () => {
     try {
-      const data = await devsFirePost(
-        "/connectToServer",
-        undefined,
-        {},
-        "connect",
-        {
-          "Content-Type": "text/plain",
-        },
-      );
+      const data = await connectToDevsFire();
 
       const isHtmlLike = (value: string): boolean => {
         const trimmed = value.trimStart().toLowerCase();

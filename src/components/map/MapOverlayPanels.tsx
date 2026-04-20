@@ -37,14 +37,13 @@ import {
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 import type {
   ActionPayload,
-  IgnitionMode,
   IgnitionPlan,
   SegmentEdit,
 } from "@/types/ignitionPlan";
 import {
   IGNITION_TEAM_PICKER_COUNT,
   ignitionModeForGeometry,
-  ignitionModesForSegmentGeometry,
+  ignitionModeOptionsForCurrent,
 } from "@/types/ignitionPlan";
 import type { MapInteractionMode } from "./MapInteractionLayer";
 
@@ -401,6 +400,8 @@ function RunConfigPanel({
   canReplay = false,
   onReplayPlay,
   onReplayPause,
+  replayCursor,
+  replayMaxTime,
 }: {
   onStartSimulation?: (simulationTimesteps: number) => void;
   /** Emits upward — modal host owns the confirm dialog */
@@ -416,7 +417,14 @@ function RunConfigPanel({
   canReplay?: boolean;
   onReplayPlay?: () => void;
   onReplayPause?: () => void;
+  replayCursor?: number | null;
+  replayMaxTime?: number;
 }) {
+  const replayCurrentTimestep = Math.max(0, Math.floor(replayCursor ?? 0));
+  const replayTotalTimestep = Math.max(
+    0,
+    Math.floor(replayMaxTime ?? simulationTimesteps),
+  );
 
   return (
     <Panel className="w-[160px] sm:w-[175px] md:w-[190px]">
@@ -460,17 +468,17 @@ function RunConfigPanel({
           <Input
             type="range"
             min={1}
-            max={10}
-            step={0.25}
+            max={100}
+            step={1}
             value={playbackRate}
             onChange={(e) => onPlaybackRateChange?.(Number(e.target.value))}
             className="h-auto w-full border-0 bg-transparent px-0 py-0 accent-orange-400"
           />
           <div className="flex justify-between text-[8px] text-white/20 sm:text-[9px]">
             <span>1×</span>
-            <span>2×</span>
-            <span>5×</span>
             <span>10×</span>
+            <span>50×</span>
+            <span>100×</span>
           </div>
         </div>
 
@@ -503,6 +511,9 @@ function RunConfigPanel({
               <Pause className="h-3.5 w-3.5" />
               <span className="sr-only">Pause</span>
             </Button>
+            <span className="ml-1 inline-flex rounded border border-white/10 px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-white/55">
+              {replayCurrentTimestep.toLocaleString()} / {replayTotalTimestep.toLocaleString()}
+            </span>
           </div>
           {!canReplay && (
             <p className="text-[9px] text-white/35">
@@ -1026,10 +1037,9 @@ function selectedTerrainLayer(show: Set<TerrainLayer>): TerrainLayer | null {
 
 async function tryFetchTerrainMatrix(
   path: string,
-  token: string,
 ): Promise<{ data: number[][] | null; error: string | null }> {
   try {
-    const data = await fetchTerrainMatrix(path, token);
+    const data = await fetchTerrainMatrix(path);
     return { data, error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : String(e) };
@@ -1058,9 +1068,8 @@ function TerrainDataPanel({
 
     onChange({ loading: true, error: null });
 
-    let token: string;
     try {
-      token = await bootstrapTerrainSession(plan, weather);
+      await bootstrapTerrainSession(plan, weather);
     } catch (e) {
       onChange({
         loading: false,
@@ -1076,7 +1085,7 @@ function TerrainDataPanel({
           ? "/getCellSlope/"
           : "/getCellAspect/";
 
-    const result = await tryFetchTerrainMatrix(endpoint, token);
+    const result = await tryFetchTerrainMatrix(endpoint);
 
     onChange({
       loading: false,
@@ -1226,13 +1235,7 @@ function IgnitionModeSelect({
   onSegmentEdit: (edit: SegmentEdit) => void;
 }) {
   const value = ignitionModeForGeometry(mode, isPoint);
-  const options = ignitionModesForSegmentGeometry(isPoint);
-
-  useEffect(() => {
-    if (value !== mode) {
-      onSegmentEdit({ teamIndex, segmentIndex: segIndex, mode: value });
-    }
-  }, [teamIndex, segIndex, mode, value, onSegmentEdit]);
+  const options = ignitionModeOptionsForCurrent(value);
 
   return (
     <Select
@@ -1241,7 +1244,7 @@ function IgnitionModeSelect({
         onSegmentEdit({
           teamIndex,
           segmentIndex: segIndex,
-          mode: nextValue as IgnitionMode,
+          mode: nextValue,
         })
       }
     >
@@ -1822,6 +1825,8 @@ type MapOverlayPanelsProps = {
   canReplay?: boolean;
   onReplayPlay?: () => void;
   onReplayPause?: () => void;
+  replayCursor?: number | null;
+  replayMaxTime?: number;
   layout?: "overlay" | "map-utilities" | "run-config-overlay";
 };
 
@@ -1861,6 +1866,8 @@ export function MapOverlayPanels({
   canReplay = false,
   onReplayPlay,
   onReplayPause,
+  replayCursor,
+  replayMaxTime,
   layout = "overlay",
 }: MapOverlayPanelsProps) {
   if (layout === "run-config-overlay") {
@@ -1879,6 +1886,8 @@ export function MapOverlayPanels({
           canReplay={canReplay}
           onReplayPlay={onReplayPlay}
           onReplayPause={onReplayPause}
+          replayCursor={replayCursor}
+          replayMaxTime={replayMaxTime}
         />
       </div>
     );
@@ -1889,7 +1898,7 @@ export function MapOverlayPanels({
       <div className="pointer-events-none absolute bottom-16 right-2 z-450 flex flex-col gap-1.5 sm:bottom-20 sm:right-3 sm:gap-2">
         {terrainState && onTerrainChange && projectConfig && (
           <TerrainDataPanel
-            centerSet={!!projectConfig.boundaryGeoJSON}
+            centerSet={hasProjectLocation}
             plan={projectConfig}
             weather={weather}
             state={terrainState}
@@ -1933,6 +1942,8 @@ export function MapOverlayPanels({
             canReplay={canReplay}
             onReplayPlay={onReplayPlay}
             onReplayPause={onReplayPause}
+            replayCursor={replayCursor}
+            replayMaxTime={replayMaxTime}
           />
           {projectConfig && onSegmentEdit && onSegmentDelete && onPointIgnitionEdit && (
             <IgnitionParametersPanel

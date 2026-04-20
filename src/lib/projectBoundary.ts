@@ -4,6 +4,7 @@
  */
 
 import type { BoundaryGeoJSON, IgnitionPlan } from "@/types/ignitionPlan";
+import { hasNonZeroCenter, isValidGeodeticCenter } from "@/lib/geoCoords";
 
 const METERS_PER_DEG = 111320;
 
@@ -92,7 +93,8 @@ export function pointInBoundary(lat: number, lng: number, boundary: BoundaryGeoJ
 /** When loading older saves: add a synthetic grid boundary if center is set but polygon is missing. */
 export function ensurePlanBoundary(plan: IgnitionPlan): IgnitionPlan {
   if (plan.boundaryGeoJSON) return plan;
-  if (plan.proj_center_lng === 0 && plan.proj_center_lat === 0) return plan;
+  if (!hasNonZeroCenter(plan.proj_center_lat, plan.proj_center_lng)) return plan;
+  if (!isValidGeodeticCenter(plan.proj_center_lat, plan.proj_center_lng)) return plan;
   return {
     ...plan,
     boundaryGeoJSON: syntheticBoundaryFromGrid({

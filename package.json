@@ -2,8 +2,9 @@
   "name": "firesimmap-v2",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "bun@1.3.1",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "bun scripts/dev.mjs",
     "dev:next": "next dev",
     "dev:mastra": "mastra dev",
     "build": "next build",

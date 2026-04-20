@@ -36,15 +36,12 @@ type ChatHelpers = {
   messages: UIMessage[];
   sendMessage: ReturnType<typeof useChat>["sendMessage"];
   status: ReturnType<typeof useChat>["status"];
-  showStarterPrompt: boolean;
-  starterPromptText: string;
-  sendStarterPrompt: () => Promise<void>;
-  dismissStarterPrompt: () => Promise<void>;
 };
 
 type ProjectAgentChatHostProps = {
   projectId: string;
   mode: ProjectWorkflowMode;
+  autoStartGuidedNonce: number;
   planSnapshot: IgnitionPlan;
   initialMessages: UIMessage[];
   introDoneServer: boolean;
@@ -56,6 +53,7 @@ type ProjectAgentChatHostProps = {
 export function ProjectAgentChatHost({
   projectId,
   mode,
+  autoStartGuidedNonce,
   planSnapshot,
   initialMessages,
   introDoneServer,
@@ -83,6 +81,7 @@ export function ProjectAgentChatHost({
 
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPersistKeyRef = useRef<string | null>(null);
+  const handledAutoStartNonceRef = useRef(0);
   const stableMessages = useMemo(() => dedupeMessagesById(messages), [messages]);
 
   const schedulePersist = useCallback(
@@ -124,16 +123,21 @@ export function ProjectAgentChatHost({
     onIntroClaimed();
   }, [projectId, onIntroClaimed]);
 
-  const dismissStarterPrompt = useCallback(async () => {
-    await consumeIntro();
-  }, [consumeIntro]);
-
-  const sendStarterPrompt = useCallback(async () => {
+  const sendGuidedStartMessage = useCallback(async () => {
     await sendMessage({ text: DEFAULT_INTRO_USER_MESSAGE });
     await consumeIntro();
   }, [consumeIntro, sendMessage]);
 
-  const showStarterPrompt = !introDoneEff && stableMessages.length === 0;
+  useEffect(() => {
+    if (autoStartGuidedNonce <= handledAutoStartNonceRef.current) return;
+    if (mode !== "chat") return;
+    if (stableMessages.length > 0) {
+      handledAutoStartNonceRef.current = autoStartGuidedNonce;
+      return;
+    }
+    handledAutoStartNonceRef.current = autoStartGuidedNonce;
+    void sendGuidedStartMessage();
+  }, [autoStartGuidedNonce, mode, stableMessages.length, sendGuidedStartMessage]);
 
   return (
     <>
@@ -141,10 +145,6 @@ export function ProjectAgentChatHost({
         messages: stableMessages,
         sendMessage,
         status,
-        showStarterPrompt,
-        starterPromptText: DEFAULT_INTRO_USER_MESSAGE,
-        sendStarterPrompt,
-        dismissStarterPrompt,
       })}
     </>
   );

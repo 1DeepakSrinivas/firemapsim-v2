@@ -3,7 +3,7 @@ import z from "zod";
 
 import { simulationRunBodySchema } from "@/app/api/simulation/run/route";
 import { runSimulationWithDynamicWeather } from "@/lib/api/devsFireBackend";
-import type { IgnitionPlan } from "@/types/ignitionPlan";
+import { normalizeIgnitionPlan } from "@/types/ignitionPlan";
 
 const inputSchema = simulationRunBodySchema.extend({
   reason: z.string().optional(),
@@ -23,9 +23,11 @@ export const simulationDelegateRun = createTool({
   execute: async (payload) => {
     const parsed = inputSchema.parse(payload);
     const { reason: _reason, ...body } = parsed;
+    const normalizedPlan = normalizeIgnitionPlan(body.plan);
 
     const output = await runSimulationWithDynamicWeather({
-      plan: body.plan as IgnitionPlan,
+      projectId: body.projectId,
+      plan: normalizedPlan,
       weatherOverrides: body.weatherOverrides,
       simulationHours: body.simulationHours,
     });

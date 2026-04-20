@@ -1,6 +1,12 @@
 import "server-only";
 
 import z from "zod";
+import {
+  DEFAULT_DEVS_FIRE_REQUEST_TIMEOUT_MS,
+  parseTimeoutMs,
+} from "./config";
+import { devsFireRequest } from "@/lib/devsfire/httpClient";
+import { DevsFireError } from "@/lib/devsfire/errors";
 
 export {
   parseSimulationOperationsResponse,
@@ -48,15 +54,9 @@ export const DEVS_FIRE_BASE_URL = normalizeDevsFireBaseUrl(
 );
 export const DEVS_FIRE_PROXY_PATH = "/api/devs-fire";
 
-function parseTimeoutMs(value: string | undefined, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.floor(parsed);
-}
-
 const DEVS_FIRE_REQUEST_TIMEOUT_MS = parseTimeoutMs(
   process.env.DEVS_FIRE_REQUEST_TIMEOUT_MS,
-  30_000,
+  DEFAULT_DEVS_FIRE_REQUEST_TIMEOUT_MS,
 );
 
 export const numericMatrixSchema = z.array(z.array(z.coerce.number()));
@@ -64,9 +64,49 @@ export const numericMatrixSchema = z.array(z.array(z.coerce.number()));
 type QueryValue = string | number | boolean | null | undefined;
 type QueryParams = Record<string, QueryValue>;
 
+export type DevsFireConnectProbeClassification =
+  | "success"
+  | "upstream_timeout"
+  | "upstream_unreachable"
+  | "upstream_http_error"
+  | "upstream_html_response"
+  | "invalid_connect_payload";
+
+export type DevsFireConnectProbeAttempt = {
+  method: "POST" | "GET";
+  url: string;
+  elapsedMs: number;
+  status?: number;
+  location?: string;
+  contentType?: string;
+  tokenDetected: boolean;
+  htmlLike: boolean;
+  outcome: DevsFireConnectProbeClassification;
+  preview?: string;
+  error?: string;
+};
+
+export type DevsFireConnectProbeResult = {
+  ok: boolean;
+  baseUrl: string;
+  classification: DevsFireConnectProbeClassification;
+  attempts: DevsFireConnectProbeAttempt[];
+  totalMs: number;
+  error?: string;
+};
+
 const proxyEnvelopeSchema = z.object({
   data: z.unknown(),
 });
+
+const CONNECT_ATTEMPTS = [
+  { method: "POST", path: "/connectToServer", body: "connect", contentType: "text/plain" },
+  { method: "POST", path: "/connectToServer/", body: "connect", contentType: "text/plain" },
+  { method: "GET", path: "/connectToServer" },
+  { method: "GET", path: "/connectToServer/" },
+] as const;
+
+const DEFAULT_CONNECT_PROBE_TIMEOUT_MS = 30_000;
 
 function normalizePath(path: string): string {
   if (path.startsWith("/")) {
@@ -127,6 +167,99 @@ function parseDevsFireResponse(text: string, endpoint: string): unknown {
       );
     }
     return text;
+  }
+}
+
+function parseConnectToken(
+  data: unknown,
+): { token: string | null; htmlLike: boolean } {
+  if (typeof data === "string") {
+    const token = data.trim();
+    if (!token) {
+      return { token: null, htmlLike: false };
+    }
+    return { token, htmlLike: looksLikeHtmlDocument(token) };
+  }
+
+  if (data && typeof data === "object") {
+    const value = data as Record<string, unknown>;
+    const token = value.token ?? value.userToken;
+    if (typeof token === "string") {
+      const trimmed = token.trim();
+      if (trimmed) {
+        return { token: trimmed, htmlLike: looksLikeHtmlDocument(trimmed) };
+      }
+    }
+  }
+
+  return { token: null, htmlLike: false };
+}
+
+function parseMaybeJson(text: string): unknown {
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function summarizeResponsePreview(text: string): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.slice(0, 300);
+}
+
+function classifyConnectProbeAttempts(
+  attempts: DevsFireConnectProbeAttempt[],
+): DevsFireConnectProbeClassification {
+  if (attempts.some((attempt) => attempt.outcome === "success")) {
+    return "success";
+  }
+  if (attempts.some((attempt) => attempt.outcome === "upstream_html_response")) {
+    return "upstream_html_response";
+  }
+  if (attempts.some((attempt) => attempt.outcome === "upstream_http_error")) {
+    return "upstream_http_error";
+  }
+  if (attempts.some((attempt) => attempt.outcome === "upstream_unreachable")) {
+    return "upstream_unreachable";
+  }
+  if (attempts.some((attempt) => attempt.outcome === "upstream_timeout")) {
+    return "upstream_timeout";
+  }
+
+  return "invalid_connect_payload";
+}
+
+function connectProbeErrorMessage(
+  classification: DevsFireConnectProbeClassification,
+): string | undefined {
+  switch (classification) {
+    case "success":
+      return undefined;
+    case "upstream_timeout":
+      return "DEVS-FIRE connect probe timed out before receiving a token.";
+    case "upstream_unreachable":
+      return "DEVS-FIRE connect probe could not reach upstream.";
+    case "upstream_http_error":
+      return "DEVS-FIRE connect probe received a non-2xx HTTP response.";
+    case "upstream_html_response":
+      return "DEVS-FIRE connect probe received HTML instead of a token.";
+    case "invalid_connect_payload":
+      return "DEVS-FIRE connect probe did not find a token in any successful response.";
+    default:
+      return "DEVS-FIRE connect probe failed.";
   }
 }
 
@@ -273,77 +406,165 @@ export async function devsFirePost(
   extraParams: QueryParams = {},
   body?: unknown,
   headers: HeadersInit = {},
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ): Promise<unknown> {
-  const url = new URL(`${DEVS_FIRE_BASE_URL}${normalizePath(path)}`);
-
-  if (token) {
-    url.searchParams.set("userToken", token);
-  }
-
-  for (const [key, value] of Object.entries(extraParams)) {
-    if (value !== undefined && value !== null) {
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  const requestHeaders = new Headers(headers);
-  const requestParts = toBodyAndHeaders(body, requestHeaders);
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    Math.max(1_000, DEVS_FIRE_REQUEST_TIMEOUT_MS),
+  const endpointPath = `/api${normalizePath(path).replace(/\/$/, "")}`;
+  const timeoutMs = Math.max(
+    1_000,
+    Math.floor(options?.timeoutMs ?? DEVS_FIRE_REQUEST_TIMEOUT_MS),
   );
 
-  let removeAbortListener: (() => void) | null = null;
-  if (options?.signal) {
-    if (options.signal.aborted) {
-      controller.abort();
-    } else {
-      const onAbort = () => controller.abort();
-      options.signal.addEventListener("abort", onAbort, { once: true });
-      removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
-    }
-  }
-
-  let response: Response;
   try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: requestParts.headers,
-      body: requestParts.body,
-      redirect: "manual",
-      cache: "no-store",
-      signal: controller.signal,
+    return await devsFireRequest({
+      endpoint: path,
+      userToken: token,
+      query: extraParams,
+      body,
+      headers,
+      timeoutMs,
+      signal: options?.signal,
     });
   } catch (error) {
-    if ((error as { name?: string })?.name === "AbortError") {
-      throw new Error(
-        `DEVS-FIRE request timed out after ${Math.floor(DEVS_FIRE_REQUEST_TIMEOUT_MS / 1000)}s for ${url.pathname}`,
-      );
+    if (error instanceof DevsFireError) {
+      if (error.type === "TimeoutError") {
+        throw new Error(
+          `DEVS-FIRE request timed out after ${Math.floor(timeoutMs / 1000)}s for ${endpointPath}`,
+        );
+      }
+
+      if (error.type === "ServerError" || error.type === "SimulationError") {
+        throw new Error(
+          `DEVS-FIRE request failed for ${endpointPath}: ${error.details ?? error.message}`,
+        );
+      }
+
+      if (error.type === "ConnectionError") {
+        throw new Error(`DEVS-FIRE request failed for ${endpointPath}: fetch failed`);
+      }
     }
+
     throw error;
-  } finally {
-    clearTimeout(timeoutId);
-    removeAbortListener?.();
   }
+}
 
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get("location");
+export async function connectToDevsFire(): Promise<unknown> {
+  const connectPath = "/connectToServer";
+  try {
+    return await devsFirePost(
+      connectPath,
+      undefined,
+      {},
+      "connect",
+      { "Content-Type": "text/plain" },
+    );
+  } catch (error) {
     throw new Error(
-      `DEVS-FIRE redirected ${url.pathname} (${response.status})${location ? ` to ${location}` : ""}. Verify DEVS_FIRE_BASE_URL is ${DEVS_FIRE_CANONICAL_BASE_URL}.`,
+      `DEVS-FIRE connectToServer failed for ${DEVS_FIRE_BASE_URL}${connectPath}: ${toErrorMessage(error)}`,
     );
   }
+}
 
-  const responseText = await response.text();
+export async function probeDevsFireConnect(options?: {
+  baseUrl?: string;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<DevsFireConnectProbeResult> {
+  const startedAt = Date.now();
+  const baseUrl = normalizeDevsFireBaseUrl(options?.baseUrl ?? DEVS_FIRE_BASE_URL);
+  const root = baseUrl.replace(/\/+$/, "");
+  const timeoutMs = Math.max(
+    1_000,
+    Math.floor(options?.timeoutMs ?? DEFAULT_CONNECT_PROBE_TIMEOUT_MS),
+  );
+  const fetchImpl = options?.fetchImpl ?? fetch;
+  const attempts: DevsFireConnectProbeAttempt[] = [];
 
-  if (!response.ok) {
-    const detail = responseText ? ` - ${responseText.slice(0, 300)}` : "";
-    throw new Error(
-      `DEVS-FIRE request failed for ${url.pathname}: ${response.status} ${response.statusText}${detail}`,
-    );
+  for (const attempt of CONNECT_ATTEMPTS) {
+    const url = `${root}${attempt.path}`;
+    const attemptStartedAt = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const requestHeaders = new Headers({ Accept: "application/json" });
+      if ("contentType" in attempt && attempt.contentType) {
+        requestHeaders.set("Content-Type", attempt.contentType);
+      }
+
+      const response = await fetchImpl(url, {
+        method: attempt.method,
+        headers: requestHeaders,
+        body:
+          attempt.method === "POST" && "body" in attempt
+            ? attempt.body
+            : undefined,
+        redirect: "manual",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      const text = await response.text();
+      const parsed = parseMaybeJson(text);
+      const parsedToken = parseConnectToken(parsed);
+      const tokenDetected =
+        response.ok && Boolean(parsedToken.token) && !parsedToken.htmlLike;
+      const htmlLike =
+        response.ok && (parsedToken.htmlLike || looksLikeHtmlDocument(text));
+
+      let outcome: DevsFireConnectProbeClassification;
+      if (!response.ok) {
+        outcome = "upstream_http_error";
+      } else if (tokenDetected) {
+        outcome = "success";
+      } else if (htmlLike) {
+        outcome = "upstream_html_response";
+      } else {
+        outcome = "invalid_connect_payload";
+      }
+
+      attempts.push({
+        method: attempt.method,
+        url,
+        elapsedMs: Date.now() - attemptStartedAt,
+        status: response.status,
+        location: response.headers.get("location") ?? undefined,
+        contentType: response.headers.get("content-type") ?? undefined,
+        tokenDetected,
+        htmlLike,
+        outcome,
+        preview: summarizeResponsePreview(text),
+      });
+    } catch (error) {
+      const message = toErrorMessage(error);
+      const timedOut =
+        (error as { name?: string })?.name === "AbortError" ||
+        message.toLowerCase().includes("timed out") ||
+        message.toLowerCase().includes("timeout") ||
+        message.toLowerCase().includes("abort");
+
+      attempts.push({
+        method: attempt.method,
+        url,
+        elapsedMs: Date.now() - attemptStartedAt,
+        tokenDetected: false,
+        htmlLike: false,
+        outcome: timedOut ? "upstream_timeout" : "upstream_unreachable",
+        error: message,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
-  return parseDevsFireResponse(responseText, url.pathname);
+  const classification = classifyConnectProbeAttempts(attempts);
+  const ok = classification === "success";
+
+  return {
+    ok,
+    baseUrl,
+    classification,
+    attempts,
+    totalMs: Date.now() - startedAt,
+    error: connectProbeErrorMessage(classification),
+  };
 }
