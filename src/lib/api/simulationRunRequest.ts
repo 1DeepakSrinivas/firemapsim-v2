@@ -1,5 +1,8 @@
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
-import type { IgnitionPlan } from "@/types/ignitionPlan";
+import {
+  withSquareGridDimensions,
+  type IgnitionPlan,
+} from "@/types/ignitionPlan";
 
 export type SimulationRunRequestBody = {
   projectId: string;
@@ -15,14 +18,14 @@ export function buildSimulationRunRequestBody(input: {
   weatherOverrides: Partial<WeatherValues>;
   simulationTimesteps: number;
 }): SimulationRunRequestBody {
-  const planPayload: IgnitionPlan = {
+  const planPayload: IgnitionPlan = withSquareGridDimensions({
     ...input.plan,
     windSpeed: input.weather.windSpeed,
     windDegree: input.weather.windDirection,
     temperature: input.weather.temperature,
     humidity: input.weather.humidity,
     total_sim_time: input.simulationTimesteps,
-  };
+  });
 
   return {
     projectId: input.projectId,

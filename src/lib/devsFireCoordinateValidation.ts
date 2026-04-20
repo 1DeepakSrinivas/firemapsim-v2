@@ -25,36 +25,32 @@ function assertInBounds(value: number, label: string, axis: string, max: number)
 /**
  * Validate that all coordinates destined for DEVS-FIRE are within `[0, cellDimension)`.
  *
- * Suppression coordinates from the plan use x=column, y=row (internal convention).
- * After the row/column swap applied at call time, DEVS-FIRE sees x=row, y=column.
- * This function checks the post-swap values.
- *
- * Ignition dispatch commands are already in DEVS-FIRE convention (x=row, y=column).
+ * Runtime-first convention: plan geometry, map overlays, and simulation operations
+ * all use x=column, y=row.
  */
 export function validateAllCoordinates(
   plan: IgnitionPlan,
   commands: IgnitionDispatchCommand[],
   cellDimension: number,
 ): void {
-  // Suppression lines — plan coords need swap (x=col→y, y=row→x)
+  // Suppression lines are sent with the same x/y orientation as the plan.
   for (let i = 0; i < plan.sup_infos.length; i += 1) {
     const sup = plan.sup_infos[i];
     const label = `Suppression line ${i + 1}`;
-    // After swap: DEVS-FIRE x=sup.y, DEVS-FIRE y=sup.x
-    assertInBounds(sup.y1, label, "x1 (row)", cellDimension);
-    assertInBounds(sup.x1, label, "y1 (col)", cellDimension);
-    assertInBounds(sup.y2, label, "x2 (row)", cellDimension);
-    assertInBounds(sup.x2, label, "y2 (col)", cellDimension);
+    assertInBounds(sup.x1, label, "x1 (col)", cellDimension);
+    assertInBounds(sup.y1, label, "y1 (row)", cellDimension);
+    assertInBounds(sup.x2, label, "x2 (col)", cellDimension);
+    assertInBounds(sup.y2, label, "y2 (row)", cellDimension);
   }
 
-  // Ignition commands — already in DEVS-FIRE convention from dispatch
+  // Ignition commands also use x=column, y=row.
   for (const command of commands) {
     if (command.kind === "setDynamicIgnition") {
       const label = `Dynamic ignition (${command.teamName})`;
-      assertInBounds(command.x1, label, "x1 (row)", cellDimension);
-      assertInBounds(command.y1, label, "y1 (col)", cellDimension);
-      assertInBounds(command.x2, label, "x2 (row)", cellDimension);
-      assertInBounds(command.y2, label, "y2 (col)", cellDimension);
+      assertInBounds(command.x1, label, "x1 (col)", cellDimension);
+      assertInBounds(command.y1, label, "y1 (row)", cellDimension);
+      assertInBounds(command.x2, label, "x2 (col)", cellDimension);
+      assertInBounds(command.y2, label, "y2 (row)", cellDimension);
     } else {
       const label = `Point ignition (${command.teamName})`;
       for (const x of command.xs) {

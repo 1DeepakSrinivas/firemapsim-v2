@@ -199,11 +199,6 @@ export function MapInteractionLayer({
           if (!ok(end)) return;
           linePreviewRef.current?.remove();
           linePreviewRef.current = null;
-          L.polyline([start, end], {
-            color: accentColor,
-            weight: 2.5,
-            dashArray: undefined,
-          }).addTo(map);
           onLine?.(start, end);
           lineStartRef.current = null;
           lineStartMarkerRef.current?.remove();
@@ -257,19 +252,13 @@ export function MapInteractionLayer({
       function handlePolygonDblClick() {
         const nodes = polygonNodesRef.current;
         if (nodes.length < 3) return;
-        // Close the polygon visually
-        polygonPolylineRef.current?.remove();
-        L.polygon(nodes, {
-          color: accentColor,
-          weight: 2,
-          fillColor: accentColor,
-          fillOpacity: 0.12,
-        }).addTo(map);
         onPolygon?.(nodes);
-        // Clear working state (markers stay as visual record)
+        // Clear working state; committed geometry should be rendered by stateful layers.
+        polygonPolylineRef.current?.remove();
+        polygonPolylineRef.current = null;
+        polygonMarkersRef.current.forEach((m) => m.remove());
         polygonNodesRef.current = [];
         polygonMarkersRef.current = [];
-        polygonPolylineRef.current = null;
         polygonPreviewLineRef.current?.remove();
         polygonPreviewLineRef.current = null;
       }
@@ -353,12 +342,6 @@ export function MapInteractionLayer({
           if (!ok(c2)) return;
           rectPreviewRef.current?.remove();
           rectPreviewRef.current = null;
-          L.rectangle(L.latLngBounds(c1, c2), {
-            color: "#38bdf8",
-            weight: 2,
-            fillColor: "#38bdf8",
-            fillOpacity: 0.12,
-          }).addTo(map);
           onRect?.(c1, c2);
           rectCorner1Ref.current = null;
           rectCorner1MarkerRef.current?.remove();

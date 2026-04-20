@@ -210,6 +210,17 @@ describe("normalizeIgnitionPlan", () => {
     );
     expect(normalized.sup_num).toBe(1);
   });
+
+  test("normalizes rectangular grid dimensions into a square side length", () => {
+    const normalized = normalizeIgnitionPlan({
+      ...buildApiSamplePlan(),
+      cellSpaceDimension: 180,
+      cellSpaceDimensionLat: 240,
+    });
+
+    expect(normalized.cellSpaceDimension).toBe(240);
+    expect(normalized.cellSpaceDimensionLat).toBe(240);
+  });
 });
 
 describe("ignition mode helpers", () => {

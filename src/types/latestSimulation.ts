@@ -31,6 +31,20 @@ export type DevsFireCallRecord = {
   bodyType?: "none" | "text";
 };
 
+export type AxisConventionCheck = {
+  checked: boolean;
+  transposeLikely: boolean;
+  firstIgnition?: {
+    x: number;
+    y: number;
+  };
+  firstBurnTeam?: {
+    x: number;
+    y: number;
+    time: number;
+  };
+};
+
 export type LatestSimulationManifest = {
   startedAt: string;
   completedAt: string;
@@ -44,6 +58,7 @@ export type LatestSimulationManifest = {
   weatherOverrideApplied: string[];
   setupCalls: DevsFireCallRecord[];
   executionCalls: DevsFireCallRecord[];
+  axisConventionCheck?: AxisConventionCheck;
 };
 
 export type LatestSimulationStats = {
