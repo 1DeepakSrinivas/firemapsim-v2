@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Fustat, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/components/theme/ThemeProvider";
@@ -34,15 +35,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full" suppressHydrationWarning>
-      <head>
-        <script
-          // Prevent flash by resolving theme mode before hydration.
-          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
-        />
-      </head>
       <body
         className={`${fustatSans.variable} ${geistMono.variable} min-h-full flex flex-col font-sans antialiased`}
       >
+        {/* React 19: use next/script instead of raw <script> in the tree (beforeInteractive runs before hydration). */}
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
         <ClerkProvider>
           <ThemeProvider>
             {children}
