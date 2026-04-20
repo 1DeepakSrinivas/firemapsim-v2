@@ -117,9 +117,8 @@ async function withDevsFireRetry<T>(
 }
 
 /**
- * DEVS-FIRE API uses row/column naming inconsistently across endpoints.
- * `runSimulation` returns x = column, y = row. `setPointIgnition` query params are
- * documented as xs = rows, ys = columns. Our IgnitionPlan stores grid x ≈ column, y ≈ row.
+ * Runtime-first convention:
+ * plan geometry, map overlays, and simulation operations use x=column, y=row.
  */
 export function planPointToDevsFirePointIgnition(xsCols: number[], ysRows: number[]) {
   return {
@@ -191,6 +190,32 @@ function bboxFromPlan(plan: IgnitionPlan): [number, number, number, number] {
     plan.proj_center_lng + pad,
     plan.proj_center_lat + pad,
   ];
+}
+
+function firstIgnitionPointFromPlan(
+  plan: IgnitionPlan,
+): { x: number; y: number } | null {
+  for (const team of plan.team_infos) {
+    for (const seg of team.details) {
+      if (!Number.isFinite(seg.start_x) || !Number.isFinite(seg.start_y)) {
+        continue;
+      }
+      return { x: seg.start_x, y: seg.start_y };
+    }
+  }
+  return null;
+}
+
+function firstBurnTeamOperation(
+  operations: z.infer<typeof simulationOperationListSchema>,
+): { x: number; y: number; time: number } | null {
+  for (const op of operations) {
+    const name = String(op.Operation ?? "").toLowerCase();
+    if (name.includes("burnteam")) {
+      return { x: op.x, y: op.y, time: op.time };
+    }
+  }
+  return null;
 }
 
 function normalizeMatrixRows(value: unknown): number[][] {
@@ -322,9 +347,15 @@ export async function executeDevsFireSimulation(
   const fuelContent = resolveFuelMapContent(plan);
   const slopeContent = resolveSlopeMapContent(plan);
   const aspectContent = resolveAspectMapContent(plan);
-  const usesCustomTerrain = Boolean(fuelContent || slopeContent || aspectContent);
+  const hasCustomFuel = Boolean(fuelContent);
+  const hasCustomSlope = Boolean(slopeContent);
+  const hasCustomAspect = Boolean(aspectContent);
+  const usesCustomTerrain = hasCustomFuel || hasCustomSlope || hasCustomAspect;
 
-  if (!usesCustomTerrain && (!plan.proj_center_lat || !plan.proj_center_lng)) {
+  // DEVS-FIRE docs: location is required when using online fuel.
+  // Custom slope/aspect can coexist with online fuel, so only custom fuel removes
+  // the location requirement.
+  if (!hasCustomFuel && (!plan.proj_center_lat || !plan.proj_center_lng)) {
     throw new Error("Project center (proj_center_lat / proj_center_lng) is required.");
   }
 
@@ -445,7 +476,11 @@ export async function executeDevsFireSimulation(
         }),
       );
     }
-  } else if (!usedMultiParameters) {
+  }
+
+  // Online fuel requires explicit location assignment, regardless of whether
+  // custom slope/aspect overlays are also loaded.
+  if (!usedMultiParameters && !hasCustomFuel) {
     setupCalls.push({
       path: "/setCellSpaceLocation/",
       params: {
@@ -507,20 +542,14 @@ export async function executeDevsFireSimulation(
   }
 
   for (const sup of plan.sup_infos) {
-    // Plan stores x=column, y=row; DEVS-FIRE setSuppressedCell expects x=row, y=column.
-    // Swap coordinates to match the same convention used by planSegmentToDynamicIgnition.
-    const dfX1 = sup.y1;
-    const dfY1 = sup.x1;
-    const dfX2 = sup.y2;
-    const dfY2 = sup.x2;
-    const points = bresenhamLine(dfX1, dfY1, dfX2, dfY2, 1);
+    const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
     setupCalls.push({
       path: "/setSuppressedCell/",
       params: {
-        x1: dfX1,
-        y1: dfY1,
-        x2: dfX2,
-        y2: dfY2,
+        x1: sup.x1,
+        y1: sup.y1,
+        x2: sup.x2,
+        y2: sup.y2,
         pointCount: points.length,
       },
     });
@@ -610,6 +639,29 @@ export async function executeDevsFireSimulation(
   };
 
   const completedAt = new Date().toISOString();
+  const firstIgnition = firstIgnitionPointFromPlan(plan);
+  const firstBurnTeam = firstBurnTeamOperation(operations);
+  const directMatch =
+    !!firstIgnition &&
+    !!firstBurnTeam &&
+    firstIgnition.x === firstBurnTeam.x &&
+    firstIgnition.y === firstBurnTeam.y;
+  const transposeMatch =
+    !!firstIgnition &&
+    !!firstBurnTeam &&
+    firstIgnition.x === firstBurnTeam.y &&
+    firstIgnition.y === firstBurnTeam.x;
+  const transposeLikely = !directMatch && transposeMatch;
+  if (transposeLikely) {
+    console.warn(
+      "[devs-fire] Axis transpose likely detected between first ignition segment and first BurnTeam operation.",
+      {
+        firstIgnition,
+        firstBurnTeam,
+      },
+    );
+  }
+
   const manifest: LatestSimulationManifest = {
     startedAt,
     completedAt,
@@ -623,6 +675,12 @@ export async function executeDevsFireSimulation(
     weatherOverrideApplied,
     setupCalls,
     executionCalls,
+    axisConventionCheck: {
+      checked: !!firstIgnition && !!firstBurnTeam,
+      transposeLikely,
+      firstIgnition: firstIgnition ?? undefined,
+      firstBurnTeam: firstBurnTeam ?? undefined,
+    },
   };
 
   return {

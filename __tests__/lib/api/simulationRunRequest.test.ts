@@ -12,6 +12,8 @@ describe("buildSimulationRunRequestBody", () => {
       temperature: 3,
       humidity: 4,
       total_sim_time: 500,
+      cellSpaceDimension: 180,
+      cellSpaceDimensionLat: 240,
     };
 
     const payload = buildSimulationRunRequestBody({
@@ -34,6 +36,8 @@ describe("buildSimulationRunRequestBody", () => {
     expect(payload.plan.windDegree).toBe(245);
     expect(payload.plan.temperature).toBe(71);
     expect(payload.plan.humidity).toBe(30);
+    expect(payload.plan.cellSpaceDimension).toBe(240);
+    expect(payload.plan.cellSpaceDimensionLat).toBe(240);
     expect(payload.weatherOverrides.humidity).toBe(42);
   });
 });

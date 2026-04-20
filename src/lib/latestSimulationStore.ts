@@ -89,6 +89,25 @@ const replaySchema = z.object({
         bodyType: z.enum(["none", "text"]).optional(),
       }),
     ),
+    axisConventionCheck: z
+      .object({
+        checked: z.boolean(),
+        transposeLikely: z.boolean(),
+        firstIgnition: z
+          .object({
+            x: z.coerce.number(),
+            y: z.coerce.number(),
+          })
+          .optional(),
+        firstBurnTeam: z
+          .object({
+            x: z.coerce.number(),
+            y: z.coerce.number(),
+            time: z.coerce.number(),
+          })
+          .optional(),
+      })
+      .optional(),
   }),
   operations: z.array(simulationOperationSchema),
   overlay: z.array(fireOverlayPointSchema),

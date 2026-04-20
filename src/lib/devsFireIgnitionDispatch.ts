@@ -54,8 +54,8 @@ export function mapIgnitionMode(mode: string): "spot" | "continuous" {
 }
 
 /**
- * DEVS-FIRE setDynamicIgnition expects x=row and y=column.
- * IgnitionPlan stores x=column and y=row.
+ * Runtime-first convention:
+ * plan geometry, map overlays, and simulation operations all use x=column, y=row.
  */
 export function planSegmentToDynamicIgnition(seg: {
   start_x: number;
@@ -64,10 +64,10 @@ export function planSegmentToDynamicIgnition(seg: {
   end_y: number;
 }) {
   return {
-    x1: seg.start_y,
-    y1: seg.start_x,
-    x2: seg.end_y,
-    y2: seg.end_x,
+    x1: seg.start_x,
+    y1: seg.start_y,
+    x2: seg.end_x,
+    y2: seg.end_y,
   };
 }
 
