@@ -64,6 +64,42 @@ export type IgnitionPlan = {
   boundaryGeoJSON?: BoundaryGeoJSON;
 };
 
+type PlanWithGridDims = {
+  cellSpaceDimension: number;
+  cellSpaceDimensionLat: number;
+};
+
+export function normalizeSquareCellSpaceSide(
+  cellSpaceDimension: number,
+  cellSpaceDimensionLat: number,
+): number {
+  const colSide = Number.isFinite(cellSpaceDimension)
+    ? Math.max(1, Math.round(cellSpaceDimension))
+    : 1;
+  const rowSide = Number.isFinite(cellSpaceDimensionLat)
+    ? Math.max(1, Math.round(cellSpaceDimensionLat))
+    : colSide;
+  return Math.max(colSide, rowSide);
+}
+
+export function withSquareGridDimensions<T extends PlanWithGridDims>(plan: T): T {
+  const side = normalizeSquareCellSpaceSide(
+    plan.cellSpaceDimension,
+    plan.cellSpaceDimensionLat,
+  );
+  if (
+    plan.cellSpaceDimension === side &&
+    plan.cellSpaceDimensionLat === side
+  ) {
+    return plan;
+  }
+  return {
+    ...plan,
+    cellSpaceDimension: side,
+    cellSpaceDimensionLat: side,
+  };
+}
+
 export function defaultIgnitionPlan(): IgnitionPlan {
   return {
     name: "",
@@ -249,7 +285,7 @@ export function normalizeIgnitionPlan(raw: unknown): IgnitionPlan {
 
   const normalizedTeamInfos = team_infos.length > 0 ? team_infos : base.team_infos;
 
-  return {
+  const normalizedPlan: IgnitionPlan = {
     ...base,
     ...(typeof raw.name === "string" ? { name: raw.name } : {}),
     ...(typeof raw.info_type === "string" ? { info_type: raw.info_type } : {}),
@@ -295,6 +331,7 @@ export function normalizeIgnitionPlan(raw: unknown): IgnitionPlan {
       ? { boundaryGeoJSON: raw.boundaryGeoJSON as BoundaryGeoJSON }
       : {}),
   };
+  return withSquareGridDimensions(normalizedPlan);
 }
 
 function segmentPoint(x: number, y: number, speed: number, mode: string): SegmentDetail {
@@ -533,7 +570,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
           cellSpaceDimension,
           cellSpaceDimensionLat,
         });
-      return {
+      return withSquareGridDimensions({
         ...plan,
         proj_center_lng: payload.proj_center_lng,
         proj_center_lat: payload.proj_center_lat,
@@ -541,7 +578,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
         cellSpaceDimension,
         cellSpaceDimensionLat,
         boundaryGeoJSON,
-      };
+      });
     }
     case "point-ignition": {
       const speed = 3;
@@ -559,7 +596,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
         { ...team0, info_num: details.length, details },
         ...plan.team_infos.slice(1),
       ];
-      return { ...plan, team_infos: nextTeams };
+      return withSquareGridDimensions({ ...plan, team_infos: nextTeams });
     }
     case "line-ignition": {
       const speed = payload.speed ?? 3;
@@ -584,7 +621,7 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
         { ...team0, info_num: details.length, details },
         ...plan.team_infos.slice(1),
       ];
-      return { ...plan, team_infos: nextTeams };
+      return withSquareGridDimensions({ ...plan, team_infos: nextTeams });
     }
     case "fuel-break": {
       const pieces: SupInfo[] = payload.splitIntoRectangleEdges
@@ -616,13 +653,13 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
           ]
         : [{ x1: payload.x1, y1: payload.y1, x2: payload.x2, y2: payload.y2 }];
       const sup_infos = [...plan.sup_infos, ...pieces];
-      return {
+      return withSquareGridDimensions({
         ...plan,
         sup_infos,
         sup_num: sup_infos.length,
-      };
+      });
     }
     default:
-      return plan;
+      return withSquareGridDimensions(plan);
   }
 }

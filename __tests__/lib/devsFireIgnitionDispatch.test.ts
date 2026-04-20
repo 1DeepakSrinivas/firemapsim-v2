@@ -54,10 +54,10 @@ describe("buildIgnitionDispatchCommands", () => {
     const [first, second] = commands;
     expect(first).toMatchObject({
       kind: "setDynamicIgnition",
-      x1: 190,
-      y1: 10,
-      x2: 8,
-      y2: 11,
+      x1: 10,
+      y1: 190,
+      x2: 11,
+      y2: 8,
       mode: "continuous",
       speed: 3,
       teamName: "team0",
@@ -65,10 +65,10 @@ describe("buildIgnitionDispatchCommands", () => {
     expect(Object.hasOwn(first ?? {}, "distance")).toBe(false);
     expect(second).toMatchObject({
       kind: "setDynamicIgnition",
-      x1: 8,
-      y1: 11,
-      x2: 7,
-      y2: 193,
+      x1: 11,
+      y1: 8,
+      x2: 193,
+      y2: 7,
       mode: "spot",
       speed: 4,
       distance: 3,
