@@ -43,6 +43,8 @@ This document provides a technical overview of the classes, files, and environme
    OPENROUTER_API_KEY=...
    SUPABASE_URL=...
    SUPABASE_SERVICE_ROLE_KEY=...
+   # Optional for local dev (if unset, Mastra falls back to local file:tmp/mastra.db)
+   DATABASE_URL=postgresql://...
    ```
 4. **Run the development server**:
    ```bash
@@ -119,3 +121,9 @@ If upstream checks fail from your local environment:
 3. Re-run `bun run devsfire:connect` and the `/api/devs-fire/smoke` check.
 
 If local succeeds but deployed fails, troubleshoot server/network egress policy on the deployment host.
+
+## 5. Mastra Storage Deployment Notes
+
+- Mastra deploy resolves env files in this precedence order: `.env.production`, then `.env.local`, then `.env`.
+- Production deployments must set `DATABASE_URL` to a PostgreSQL connection string (`postgres://` or `postgresql://`), typically your Supabase Session Pooler (5432) URL.
+- Local `file:` storage is development-only fallback and is rejected in production.

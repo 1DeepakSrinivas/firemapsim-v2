@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
-import { mastra } from "@/mastra";
+import { getMastra } from "@/mastra";
 import type { SimulateWorkflowInput } from "@/mastra/workflows/simulate";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function jsonSseEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const input = parseQueryAsInput(request.nextUrl.searchParams);
-    const workflow = mastra.getWorkflow("simulateWorkflow");
+    const workflow = getMastra().getWorkflow("simulateWorkflow");
     const run = await workflow.createRun({ resourceId: userId });
     const output = run.stream({ inputData: input, closeOnSuspend: true });
 

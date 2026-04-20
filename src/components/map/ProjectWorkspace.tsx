@@ -45,7 +45,9 @@ import {
   applySegmentEdit,
   defaultIgnitionPlan,
   mergeActionIntoPlan,
+  normalizeSquareCellSpaceSide,
   normalizeIgnitionPlan,
+  withSquareGridDimensions,
   type ActionPayload,
   type BoundaryGeoJSON,
   type IgnitionPlan,
@@ -126,6 +128,29 @@ function statsFromOverlay(points: FireOverlayPoint[]) {
     else unburned += 1;
   }
   return { burning, burned, unburned };
+}
+
+function operationNamesFromPayload(operations: unknown): string[] {
+  if (!Array.isArray(operations)) return [];
+  const names: string[] = [];
+  for (const entry of operations) {
+    if (!entry || typeof entry !== "object") continue;
+    const operation = (entry as { Operation?: unknown }).Operation;
+    if (typeof operation === "string" && operation.trim()) {
+      names.push(operation.toLowerCase());
+    }
+  }
+  return names;
+}
+
+function shouldWarnNoPropagation(operations: unknown): boolean {
+  const names = operationNamesFromPayload(operations);
+  if (names.length === 0) return false;
+  const hasIgnition = names.some(
+    (name) => name.includes("burnteam") || name.includes("ignite"),
+  );
+  const hasSpread = names.some((name) => name.includes("burncell"));
+  return hasIgnition && !hasSpread;
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -372,14 +397,14 @@ export function ProjectWorkspace({
 
   const effectiveOverlay = useMemo<FireOverlayPoint[]>(() => {
     if (replayState !== "idle" && replayFrame) return replayFrame;
-    // Keep simulation output ephemeral on the map; snapshots remain available for replay.
-    return [];
-  }, [replayState, replayFrame]);
+    if (replayState !== "idle") return [];
+    return latestSimulationReplay?.overlay ?? latestSimulationSummary?.overlayPreview ?? [];
+  }, [replayState, replayFrame, latestSimulationReplay, latestSimulationSummary]);
 
   const effectivePerimeter = useMemo(() => {
     if (replayState !== "idle") return null;
-    return null;
-  }, [replayState]);
+    return latestSimulationReplay?.perimeterGeoJSON ?? null;
+  }, [replayState, latestSimulationReplay]);
 
   useEffect(() => {
     if (!latestSimulationReplay || replayState === "idle") {
@@ -498,6 +523,14 @@ export function ProjectWorkspace({
         const summary = typedJson.latestSimulationSummary ?? replay?.summary ?? null;
         setLatestSimulationReplay(replay);
         setLatestSimulationSummary(summary);
+        const operationsForAnalysis = replay?.operations ?? typedJson.operations;
+        if (shouldWarnNoPropagation(operationsForAnalysis)) {
+          toast("Ignition applied but no spread detected.", {
+            id: "simulation-no-propagation",
+            description:
+              "DEVS-FIRE returned ignition events without spread-cell propagation. This usually means non-burnable fuel near the ignition line.",
+          });
+        }
         setSimulationRun({
           status: "ready",
           error: null,
@@ -833,11 +866,24 @@ export function ProjectWorkspace({
     ) {
       const v = Number(update.value);
       if (Number.isNaN(v)) return;
-      const key = update.field;
-      setProjectConfig((prev) => ({
-        ...prev,
-        [key]: Math.max(1, Math.round(v)),
-      }));
+      if (update.field === "cellResolution") {
+        setProjectConfig((prev) => ({
+          ...prev,
+          cellResolution: Math.max(1, Math.round(v)),
+        }));
+        return;
+      }
+      setProjectConfig((prev) => {
+        const side = normalizeSquareCellSpaceSide(
+          update.field === "cellSpaceDimension" ? v : prev.cellSpaceDimension,
+          update.field === "cellSpaceDimensionLat" ? v : prev.cellSpaceDimensionLat,
+        );
+        return {
+          ...prev,
+          cellSpaceDimension: side,
+          cellSpaceDimensionLat: side,
+        };
+      });
       return;
     }
 
@@ -1076,8 +1122,12 @@ export function ProjectWorkspace({
       // Keep the same reset semantics as "Set Project Location" in the UI.
       const fresh = defaultIgnitionPlan();
       fresh.cellResolution = projectConfig.cellResolution;
-      fresh.cellSpaceDimension = projectConfig.cellSpaceDimension;
-      fresh.cellSpaceDimensionLat = projectConfig.cellSpaceDimensionLat;
+      const squareSide = normalizeSquareCellSpaceSide(
+        projectConfig.cellSpaceDimension,
+        projectConfig.cellSpaceDimensionLat,
+      );
+      fresh.cellSpaceDimension = squareSide;
+      fresh.cellSpaceDimensionLat = squareSide;
       fresh.windSpeed = weather.windSpeed;
       fresh.windDegree = weather.windDirection;
       fresh.temperature = weather.temperature;
@@ -1090,7 +1140,7 @@ export function ProjectWorkspace({
         boundaryGeoJSON: payload.boundaryGeoJSON,
       });
 
-      setProjectConfig(ensurePlanBoundary(merged));
+      setProjectConfig(ensurePlanBoundary(withSquareGridDimensions(merged)));
       setLocationSearchPreview(null);
       resetScenarioForLocationChange();
 
@@ -1390,9 +1440,8 @@ export function ProjectWorkspace({
     const metersPerDeg = 111320;
     const dx = (latlng.lng - cx) * metersPerDeg * Math.cos((cy * Math.PI) / 180);
     const dy = (latlng.lat - cy) * metersPerDeg;
-    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
-    const gx = Math.round(dx / cellRes + maxDim / 2);
-    const gy = Math.round(dy / cellRes + maxDim / 2);
+    const gx = Math.round(dx / cellRes + projectConfig.cellSpaceDimension / 2);
+    const gy = Math.round(dy / cellRes + projectConfig.cellSpaceDimensionLat / 2);
     const payload: ActionPayload = {
       action: "point-ignition",
       points: [{ x: gx, y: gy, speed: DEFAULT_IGNITION_SPEED_MPS, mode: "point_static" }],
@@ -1416,10 +1465,15 @@ export function ProjectWorkspace({
     const cy = projectConfig.proj_center_lat;
     const metersPerDeg = 111320;
     const cosLat = Math.cos((cy * Math.PI) / 180);
-    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
     const toGrid = (ll: import("leaflet").LatLng) => ({
-      x: Math.round(((ll.lng - cx) * metersPerDeg * cosLat) / cellRes + maxDim / 2),
-      y: Math.round(((ll.lat - cy) * metersPerDeg) / cellRes + maxDim / 2),
+      x: Math.round(
+        ((ll.lng - cx) * metersPerDeg * cosLat) / cellRes +
+          projectConfig.cellSpaceDimension / 2,
+      ),
+      y: Math.round(
+        ((ll.lat - cy) * metersPerDeg) / cellRes +
+          projectConfig.cellSpaceDimensionLat / 2,
+      ),
     });
     const s = toGrid(start);
     const e = toGrid(end);
@@ -1499,13 +1553,12 @@ export function ProjectWorkspace({
     const cy = projectConfig.proj_center_lat;
     const metersPerDeg = 111320;
     const cosLat = Math.cos((cy * Math.PI) / 180);
-    const maxDim = Math.max(projectConfig.cellSpaceDimension, projectConfig.cellSpaceDimensionLat);
     const toGrid = (ll: import("leaflet").LatLng) => {
       const dx = (ll.lng - cx) * metersPerDeg * cosLat;
       const dy = (ll.lat - cy) * metersPerDeg;
       return {
-        x: Math.round(dx / cellRes + maxDim / 2),
-        y: Math.round(dy / cellRes + maxDim / 2),
+        x: Math.round(dx / cellRes + projectConfig.cellSpaceDimension / 2),
+        y: Math.round(dy / cellRes + projectConfig.cellSpaceDimensionLat / 2),
       };
     };
     for (let i = 0; i < nodes.length - 1; i++) {
