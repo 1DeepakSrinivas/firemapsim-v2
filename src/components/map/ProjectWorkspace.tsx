@@ -35,6 +35,12 @@ import { normalizeOverlay } from "@/lib/simulationOverlay";
 import { formatSimulationRunFailureMessage } from "@/lib/api/simulationClientMessage";
 import { buildSimulationRunRequestBody } from "@/lib/api/simulationRunRequest";
 import {
+  deriveEffectiveReplayOverlay,
+  deriveEffectiveReplayPerimeter,
+  derivePanelFireStats,
+  startReplayFromBeginning,
+} from "@/lib/replayPresentation";
+import {
   hasSavedProjectMapPosition,
   navigateMapToProject,
   projectMapPositionKey,
@@ -118,18 +124,6 @@ function dedupeMessagesById(messages: UIMessage[]): UIMessage[] {
   return out;
 }
 
-function statsFromOverlay(points: FireOverlayPoint[]) {
-  let burning = 0;
-  let burned = 0;
-  let unburned = 0;
-  for (const p of points) {
-    if (p.state === "burning") burning += 1;
-    else if (p.state === "burned") burned += 1;
-    else unburned += 1;
-  }
-  return { burning, burned, unburned };
-}
-
 function operationNamesFromPayload(operations: unknown): string[] {
   if (!Array.isArray(operations)) return [];
   const names: string[] = [];
@@ -188,6 +182,7 @@ export function ProjectWorkspace({
   const [replayFrame, setReplayFrame] = useState<FireOverlayPoint[] | null>(null);
   const [replayState, setReplayState] = useState<"idle" | "playing" | "paused">("idle");
   const [replayCursor, setReplayCursor] = useState<number | null>(null);
+  const [idleReplayHidden, setIdleReplayHidden] = useState(true);
   const [autoReplayAfterRun, setAutoReplayAfterRun] = useState(false);
   const [simulationRun, setSimulationRun] = useState<{
     status: "idle" | "running" | "ready" | "error";
@@ -396,15 +391,36 @@ export function ProjectWorkspace({
   }, [stopReplayAnimation]);
 
   const effectiveOverlay = useMemo<FireOverlayPoint[]>(() => {
-    if (replayState !== "idle" && replayFrame) return replayFrame;
-    if (replayState !== "idle") return [];
-    return latestSimulationReplay?.overlay ?? latestSimulationSummary?.overlayPreview ?? [];
-  }, [replayState, replayFrame, latestSimulationReplay, latestSimulationSummary]);
+    return deriveEffectiveReplayOverlay({
+      replayState,
+      replayFrame,
+      latestSimulationReplay,
+      latestSimulationSummary,
+      idleReplayHidden,
+    });
+  }, [
+    replayState,
+    replayFrame,
+    latestSimulationReplay,
+    latestSimulationSummary,
+    idleReplayHidden,
+  ]);
 
   const effectivePerimeter = useMemo(() => {
-    if (replayState !== "idle") return null;
-    return latestSimulationReplay?.perimeterGeoJSON ?? null;
-  }, [replayState, latestSimulationReplay]);
+    return deriveEffectiveReplayPerimeter({
+      replayState,
+      replayFrame,
+      latestSimulationReplay,
+      latestSimulationSummary,
+      idleReplayHidden,
+    });
+  }, [
+    replayState,
+    replayFrame,
+    latestSimulationReplay,
+    latestSimulationSummary,
+    idleReplayHidden,
+  ]);
 
   useEffect(() => {
     if (!latestSimulationReplay || replayState === "idle") {
@@ -423,6 +439,7 @@ export function ProjectWorkspace({
       setReplayFrame(null);
       setReplayState("idle");
       setReplayCursor(null);
+      setIdleReplayHidden(true);
       setLatestSimulationSummary(null);
       setLatestSimulationReplay(null);
       if (readyBadgeTimerRef.current) {
@@ -523,6 +540,7 @@ export function ProjectWorkspace({
         const summary = typedJson.latestSimulationSummary ?? replay?.summary ?? null;
         setLatestSimulationReplay(replay);
         setLatestSimulationSummary(summary);
+        setIdleReplayHidden(true);
         const operationsForAnalysis = replay?.operations ?? typedJson.operations;
         if (shouldWarnNoPropagation(operationsForAnalysis)) {
           toast("Ignition applied but no spread detected.", {
@@ -536,7 +554,7 @@ export function ProjectWorkspace({
           error: null,
           weatherSource: typedJson.weatherSource,
         });
-        toast.success("Simulation is ready.", {
+        toast.success("Simulation is ready to be played.", {
           id: "simulation-status",
         });
         readyBadgeTimerRef.current = setTimeout(() => {
@@ -550,9 +568,13 @@ export function ProjectWorkspace({
         const replayOverlay = replay?.overlay ?? fallbackOverlay;
         if (autoReplayAfterRunRef.current && replayOverlay.length > 0) {
           setAutoReplayAfterRun(false);
-          setReplayCursor(0);
-          setReplayFrame([]);
-          setReplayState("playing");
+          startReplayFromBeginning({
+            setIdleReplayHidden,
+            replayCursorRef,
+            setReplayCursor,
+            setReplayFrame,
+            setReplayState,
+          });
         } else if (autoReplayAfterRunRef.current) {
           setAutoReplayAfterRun(false);
         }
@@ -593,6 +615,7 @@ export function ProjectWorkspace({
       throw new Error(json.error ?? "Failed to load latest simulation replay.");
     }
     setLatestSimulationReplay(json.latestSimulationReplay);
+    setIdleReplayHidden(true);
     return json.latestSimulationReplay;
   }, [latestSimulationReplay, latestSimulationSummary, projectId]);
 
@@ -601,10 +624,13 @@ export function ProjectWorkspace({
       try {
         const replay = await ensureLatestReplayLoaded();
         if (!replay) return;
-        replayCursorRef.current = 0;
-        setReplayCursor(0);
-        setReplayFrame([]);
-        setReplayState("playing");
+        startReplayFromBeginning({
+          setIdleReplayHidden,
+          replayCursorRef,
+          setReplayCursor,
+          setReplayFrame,
+          setReplayState,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to start replay.";
         toast.error(message);
@@ -677,6 +703,7 @@ export function ProjectWorkspace({
         }
         setLatestSimulationSummary(data.latestSimulationSummary ?? null);
         setLatestSimulationReplay(null);
+        setIdleReplayHidden(true);
 
         const rawChat = data.agentChatMessages;
         const loadedMessages = Array.isArray(rawChat)
@@ -831,7 +858,12 @@ export function ProjectWorkspace({
 
   const panelStats = useMemo(
     () => ({
-      ...statsFromOverlay(effectiveOverlay),
+      ...derivePanelFireStats({
+        replayState,
+        idleReplayHidden,
+        latestSimulationSummary,
+        effectiveOverlay,
+      }),
       weatherSource:
         latestSimulationSummary?.weatherSource ?? simulationRun.weatherSource,
       streamStatus: streamStatusForPanel,
@@ -839,6 +871,9 @@ export function ProjectWorkspace({
       simulationError: simulationRun.error,
     }),
     [
+      replayState,
+      idleReplayHidden,
+      latestSimulationSummary,
       effectiveOverlay,
       latestSimulationSummary?.weatherSource,
       simulationRun.weatherSource,
