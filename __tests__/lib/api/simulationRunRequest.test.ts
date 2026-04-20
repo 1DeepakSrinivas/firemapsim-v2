@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { defaultIgnitionPlan } from "@/types/ignitionPlan";
-import { buildSimulationRunRequestBody } from "./simulationRunRequest";
+import { buildSimulationRunRequestBody } from "@/lib/api/simulationRunRequest";
 
 describe("buildSimulationRunRequestBody", () => {
   test("maps frontend weather + timesteps into route payload contract", () => {

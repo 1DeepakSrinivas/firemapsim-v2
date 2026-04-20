@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_DEVS_FIRE_REQUEST_TIMEOUT_MS,
   parseTimeoutMs,
-} from "./config";
+} from "@/mastra/tools/devsFire/config";
 
 describe("parseTimeoutMs", () => {
   test("uses the new DEVS-FIRE timeout default", () => {

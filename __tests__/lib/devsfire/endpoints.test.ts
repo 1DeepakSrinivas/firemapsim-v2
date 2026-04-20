@@ -9,7 +9,7 @@ let queue: Array<{ body: string; status?: number; statusText?: string }> = [];
 let fetchCallCount = 0;
 
 async function loadEndpoints() {
-  return import("./endpoints");
+  return import("@/lib/devsfire/endpoints");
 }
 
 describe("devsfire endpoint wrappers", () => {

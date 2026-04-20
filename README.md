@@ -14,6 +14,16 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Testing Convention
+
+- Canonical test location is the root `__tests__/` tree, mirrored by source area (`__tests__/app`, `__tests__/lib`, `__tests__/mastra`, `__tests__/types`).
+- New co-located tests in `src/**/*.test.ts(x)` are deprecated and blocked by `bun run test:guard:placement`.
+- Run tests with:
+
+```bash
+bun run test
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

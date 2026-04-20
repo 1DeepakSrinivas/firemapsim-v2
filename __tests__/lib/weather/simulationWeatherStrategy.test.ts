@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { normalizeIgnitionPlan } from "@/types/ignitionPlan";
-import { resolveSimulationWeather } from "./simulationWeatherStrategy";
+import { resolveSimulationWeather } from "@/lib/weather/simulationWeatherStrategy";
 
 describe("resolveSimulationWeather", () => {
   test("uses plan-weather fallback and skips Open-Meteo for non-geodetic centers", async () => {

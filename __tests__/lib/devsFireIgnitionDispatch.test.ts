@@ -5,7 +5,7 @@ import {
   TooManyPointIgnitionsError,
   buildIgnitionDispatchCommands,
   enforcePointIgnitionLimit,
-} from "./devsFireIgnitionDispatch";
+} from "@/lib/devsFireIgnitionDispatch";
 import { normalizeIgnitionPlan } from "@/types/ignitionPlan";
 
 describe("buildIgnitionDispatchCommands", () => {

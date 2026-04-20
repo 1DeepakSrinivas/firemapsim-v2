@@ -15,7 +15,7 @@ mock.module("@/lib/devsfire/routeHandlers", () => ({
 }));
 
 async function callSmoke() {
-  const { GET } = await import("./route");
+  const { GET } = await import("@/app/api/devs-fire/smoke/route");
   return GET(new Request("http://localhost:3000/api/devs-fire/smoke"));
 }
 
