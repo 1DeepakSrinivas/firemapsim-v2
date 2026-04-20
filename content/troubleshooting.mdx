@@ -1,0 +1,105 @@
+---
+title: Troubleshooting
+description: Common user-visible errors and exact recovery steps.
+---
+
+Use this page for practical fixes based on current product behavior.
+
+## Location is locked after I ran a simulation
+
+Symptoms:
+
+- `Set/Change Project Location` is disabled,
+- UI message indicates location is locked.
+
+Why:
+
+- Existing simulation results lock location to preserve consistency.
+
+Fix:
+
+1. Use `Reset project` to clear scenario state and results.
+2. Set location again.
+3. Rebuild ignitions/fuel breaks and rerun.
+
+## Weather lookup fails
+
+Symptoms:
+
+- Weather lookup returns an error,
+- no weather values update.
+
+Common causes:
+
+- invalid query text,
+- non-US/unsupported coordinates,
+- upstream weather/geocoding service failure.
+
+Fix:
+
+1. Retry with a clear US city/address/ZIP.
+2. If needed, enter weather values manually.
+3. Retry later if external services are temporarily unavailable.
+
+## Simulation run fails immediately
+
+Symptoms:
+
+- Error toast on run start,
+- no replay output generated.
+
+Common causes:
+
+- missing ignition segment,
+- invalid or incomplete run payload,
+- backend/service failure.
+
+Fix:
+
+1. Confirm location is set.
+2. Confirm at least one ignition exists.
+3. Retry run.
+4. If persistent, reset project and re-enter baseline inputs.
+
+## Replay is unavailable
+
+Symptoms:
+
+- replay controls disabled,
+- message indicates no replay exists.
+
+Why:
+
+- no successful simulation replay has been saved yet.
+
+Fix:
+
+1. Run a successful simulation.
+2. Wait for completion.
+3. Reopen replay controls.
+
+## Authentication/session errors on protected pages
+
+Symptoms:
+
+- redirected to login,
+- unauthorized responses from protected APIs.
+
+Fix:
+
+1. Sign in again.
+2. Refresh dashboard/workspace.
+3. Confirm you are opening your own project URL.
+
+## Project rename/save/reset action fails
+
+Symptoms:
+
+- action toast shows failure,
+- project state does not update.
+
+Fix:
+
+1. Retry once.
+2. Refresh and retry.
+3. If still failing, copy current project ID/URL and report the issue.

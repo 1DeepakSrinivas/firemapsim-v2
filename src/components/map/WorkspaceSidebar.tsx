@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronRight,
   Crosshair,
-  Flame,
   LayoutGrid,
   Grid2x2,
   Loader2,
@@ -55,6 +54,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { LogoMarkIcon } from "@/components/brand/LogoMarkIcon";
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 import type {
   IgnitionPlan,
@@ -543,7 +543,7 @@ function IgnitionSection({
     : undefined;
 
   return (
-    <SidebarSection icon={Flame} label="Ignition Parameters" badge={badge}>
+    <SidebarSection icon={LogoMarkIcon} label="Ignition Parameters" badge={badge}>
       {/* Add buttons — always visible when location is set */}
       {hasProjectLocation && (
         <div className="flex gap-1 pb-1">
@@ -943,7 +943,7 @@ export function WorkspaceSidebar({
             <SidebarMenuButton size="lg" className="gap-3 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0" asChild>
               <div className="group-data-[collapsible=icon]:justify-center">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Flame className="size-4" />
+                  <LogoMarkIcon className="size-4 dark:invert-0" alt="FireMapSim-v2" />
                 </div>
                 <div className="min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                   {editingProjectTitle ? (

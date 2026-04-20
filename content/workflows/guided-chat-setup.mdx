@@ -1,0 +1,34 @@
+---
+title: Guided Chat Setup Workflow
+description: Use chat guidance to build and run a scenario with less manual overhead.
+---
+
+## Goal
+
+Use the guided chat path to gather setup inputs and trigger workspace actions.
+
+## Steps
+
+1. In the workflow mode banner, choose `Guide me via chat`.
+2. Provide scenario intent and constraints in plain language.
+3. Let the assistant propose setup updates.
+4. Confirm generated actions (location/ignitions/fuel breaks) in workspace.
+5. Trigger simulation run through assistant or run control.
+6. Validate replay and adjust inputs iteratively.
+
+## What chat can help with
+
+- collecting setup values in sequence,
+- suggesting run parameters,
+- triggering supported run/playback/reset commands,
+- applying structured plan updates to workspace state.
+
+## Tips for better prompts
+
+- include objective, location context, and assumptions,
+- specify uncertainty ranges (for weather/wind),
+- ask for one change at a time between reruns.
+
+## Safety note
+
+Always verify map placement and numeric values in workspace controls before launching final runs.
