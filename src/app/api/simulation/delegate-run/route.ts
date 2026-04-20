@@ -107,20 +107,14 @@ export async function POST(request: NextRequest) {
       finalMetrics: output.result.finalMetrics,
     };
     try {
-      const persisted = await upsertLatestSimulation({
+      await upsertLatestSimulation({
         projectId: body.projectId,
         summary,
         replay,
       });
-      if (persisted !== "ok") {
-        console.warn(
-          "Latest simulation storage unavailable; returning successful delegate run without persistence.",
-          { projectId: body.projectId, persisted },
-        );
-      }
     } catch (storageError) {
       console.warn(
-        "Failed to persist latest simulation for delegate run; returning successful response.",
+        "Failed to persist latest simulation snapshot for delegate run; returning successful response.",
         storageError,
       );
     }
