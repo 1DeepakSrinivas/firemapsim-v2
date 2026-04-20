@@ -17,13 +17,13 @@ export function WorkflowModeBanner({
 }: WorkflowModeBannerProps) {
   return (
     <div className="pointer-events-none fixed inset-x-0 top-3 z-[1200] flex justify-center px-3 sm:top-4">
-      <div className="pointer-events-auto w-full max-w-2xl rounded-xl border border-amber-300/60 bg-amber-50/95 p-3 text-amber-950 shadow-lg backdrop-blur sm:p-4">
+      <div className="pointer-events-auto w-full max-w-2xl rounded-xl border border-border bg-card/95 p-3 text-foreground shadow-lg ring-1 ring-primary/15 backdrop-blur sm:p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">
               Choose Your Setup Flow
             </p>
-            <p className="text-sm">
+            <p className="text-sm text-muted-foreground">
               You can configure this project via chat guidance or manually in the sidebar.
             </p>
           </div>
@@ -32,7 +32,7 @@ export function WorkflowModeBanner({
             variant="ghost"
             size="icon"
             onClick={onDismiss}
-            className="h-7 w-7 rounded-md text-amber-900/80 hover:bg-amber-200/70 hover:text-amber-950"
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             title="Dismiss (defaults to manual)"
           >
             <X className="h-4 w-4" />
@@ -43,7 +43,7 @@ export function WorkflowModeBanner({
           <Button
             type="button"
             onClick={onGuideMeViaChat}
-            className="h-9 flex-1 justify-center gap-2 bg-amber-600 text-white hover:bg-amber-700"
+            className="h-9 flex-1 justify-center gap-2"
           >
             <MessageSquareText className="h-4 w-4" />
             Guide me via chat
@@ -52,7 +52,7 @@ export function WorkflowModeBanner({
             type="button"
             variant="outline"
             onClick={onManualMode}
-            className="h-9 flex-1 justify-center gap-2 border-amber-400/80 bg-white/70 text-amber-950 hover:bg-amber-100"
+            className="h-9 flex-1 justify-center gap-2"
           >
             <SlidersHorizontal className="h-4 w-4" />
             I&apos;ll do it manually

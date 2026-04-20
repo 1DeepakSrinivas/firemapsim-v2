@@ -1,78 +1,38 @@
 /**
- * Browser-side DEVS-FIRE calls via `/api/devs-fire` proxy.
- * Sequence mirrors `runDevsFireFromPlan`: connect → setCellResolution → setCellSpaceLocation →
- * setWindCondition, then getCellFuel / getCellSlope / getCellAspect.
- * GSU docs: “If using the online fuel data, then the location must be picked” via
- * `setCellSpaceLocation` before terrain matrices are valid.
- *
- * @see devs-fire-docs/api-usage.html
+ * Browser-side DEVS-FIRE helpers using server-managed session cookies.
+ * Frontend never reads or transmits upstream userToken directly.
  */
 
 import type { IgnitionPlan } from "@/types/ignitionPlan";
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
 
-type ProxyPayload = {
-  path: string;
-  token?: string;
-  params?: Record<string, string | number | boolean | null>;
-  body?: unknown;
-  headers?: Record<string, string>;
+type Envelope<T> = {
+  ok: boolean;
+  data: T | null;
+  error: { type: string; message: string; details?: string } | null;
 };
 
-async function postDevsFireProxy(payload: ProxyPayload): Promise<unknown> {
-  const res = await fetch("/api/devs-fire", {
+async function postEnvelope<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
-  const json = (await res.json()) as { data?: unknown; error?: string };
-  if (!res.ok) {
-    throw new Error(json.error ?? `HTTP ${res.status}`);
+
+  const json = (await res.json().catch(() => null)) as Envelope<T> | null;
+  if (!res.ok || !json?.ok || json.data == null) {
+    const message =
+      json?.error?.message ??
+      (typeof json?.error === "string" ? json.error : undefined) ??
+      `HTTP ${res.status}`;
+    throw new Error(message);
   }
   return json.data;
 }
 
-export function parseUserToken(data: unknown): string {
-  const isHtmlLikeToken = (value: string): boolean => {
-    const trimmed = value.trimStart().toLowerCase();
-    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
-  };
-
-  if (typeof data === "string") {
-    const t = data.trim();
-    if (t) {
-      if (isHtmlLikeToken(t)) {
-        throw new Error(
-          "DEVS-FIRE returned HTML instead of a token. Check backend DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
-        );
-      }
-      return t;
-    }
-  }
-  if (data && typeof data === "object") {
-    const o = data as Record<string, unknown>;
-    const token = o.token ?? o.userToken;
-    if (typeof token === "string" && token.trim()) {
-      const trimmed = token.trim();
-      if (isHtmlLikeToken(trimmed)) {
-        throw new Error(
-          "DEVS-FIRE returned HTML instead of a token. Check backend DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
-        );
-      }
-      return trimmed;
-    }
-  }
-  throw new Error("DEVS-FIRE response did not include a user token");
-}
-
-export async function connectDevsFire(): Promise<string> {
-  const data = await postDevsFireProxy({
-    path: "/connectToServer",
-    body: "connect",
-    headers: { "Content-Type": "text/plain" },
-  });
-  return parseUserToken(data);
+export async function connectDevsFire(): Promise<void> {
+  await postEnvelope<{ connected: boolean }>("/api/devs-fire/connectToServer", {});
 }
 
 /** WGS84 center for DEVS-FIRE query params; uses polygon centroid if plan center is still at origin. */
@@ -100,41 +60,49 @@ export function effectiveDevsFireLatLng(plan: IgnitionPlan): { lat: number; lng:
   return { lat: plan.proj_center_lat, lng: plan.proj_center_lng };
 }
 
-/** Aligns the server-side grid with the current project + weather (required before terrain matrices are meaningful). */
-export async function setDevsFireCellResolution(
-  token: string,
-  plan: IgnitionPlan,
-): Promise<void> {
+/** Aligns the server-side grid with the current project (required before terrain matrices are meaningful). */
+export async function setDevsFireCellResolution(plan: IgnitionPlan): Promise<void> {
   const cellDimension = Math.max(plan.cellSpaceDimension, plan.cellSpaceDimensionLat);
-  await postDevsFireProxy({
-    path: "/setCellResolution/",
-    token,
-    params: {
-      cellResolution: plan.cellResolution,
-      cellDimension,
-    },
+  await postEnvelope<{ updated: boolean }>("/api/devs-fire/setCellResolution", {
+    cellResolution: plan.cellResolution,
+    cellDimension,
   });
 }
 
-function normalizeMatrixPayload(data: unknown, path: string): number[][] {
-  if (Array.isArray(data)) return data as number[][];
-  if (data && typeof data === "object") {
-    for (const v of Object.values(data as Record<string, unknown>)) {
-      if (Array.isArray(v)) return v as number[][];
-    }
+function endpointPathToRoute(path: string): string {
+  const cleaned = path.replace(/^\/+|\/+$/g, "");
+  if (!cleaned) {
+    throw new Error("Invalid DEVS-FIRE endpoint path.");
   }
-  throw new Error(`Unexpected response from ${path}`);
+  return `/api/devs-fire/${cleaned}`;
 }
 
-export async function fetchTerrainMatrix(path: string, token: string): Promise<number[][]> {
-  const data = await postDevsFireProxy({ path, token });
+function normalizeMatrixPayload(data: unknown, path: string): number[][] {
+  if (!data || typeof data !== "object") {
+    throw new Error(`Unexpected response from ${path}`);
+  }
+
+  const record = data as Record<string, unknown>;
+  const matrix = record.matrix;
+  if (!Array.isArray(matrix)) {
+    throw new Error(`Unexpected response from ${path}`);
+  }
+  return matrix as number[][];
+}
+
+export async function fetchTerrainMatrix(path: string): Promise<number[][]> {
+  const data = await postEnvelope<Record<string, unknown>>(endpointPathToRoute(path), {});
   return normalizeMatrixPayload(data, path);
 }
 
+/**
+ * Opens a fresh DEVS-FIRE session and configures grid + location so that terrain
+ * matrix endpoints (getCellFuel, getCellSlope, getCellAspect) return meaningful data.
+ */
 export async function bootstrapTerrainSession(
   plan: IgnitionPlan,
-  weather: WeatherValues,
-): Promise<string> {
+  _weather?: WeatherValues,
+): Promise<void> {
   const { lat, lng } = effectiveDevsFireLatLng(plan);
   if (Math.abs(lat) < 1e-8 && Math.abs(lng) < 1e-8) {
     throw new Error(
@@ -142,22 +110,10 @@ export async function bootstrapTerrainSession(
     );
   }
 
-  const token = await connectDevsFire();
-  await setDevsFireCellResolution(token, plan);
-
-  await postDevsFireProxy({
-    path: "/setCellSpaceLocation/",
-    token,
-    params: { lat, lng },
+  await connectDevsFire();
+  await setDevsFireCellResolution(plan);
+  await postEnvelope<{ updated: boolean }>("/api/devs-fire/setCellSpaceLocation", {
+    lat,
+    lng,
   });
-  await postDevsFireProxy({
-    path: "/setWindCondition/",
-    token,
-    params: {
-      windSpeed: weather.windSpeed,
-      windDirection: weather.windDirection,
-    },
-  });
-
-  return token;
 }

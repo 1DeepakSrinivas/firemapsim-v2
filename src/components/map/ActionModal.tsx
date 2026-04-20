@@ -327,7 +327,7 @@ function ManualTab({
     <div className="space-y-2.5">
       {cfg.fields.map((f) => (
         <label key={f.key} className="block">
-          <span className="mb-1 block text-[10px] font-medium text-white/45">{f.label}</span>
+          <span className="mb-1 block text-[10px] font-medium text-muted-foreground">{f.label}</span>
           <div className="flex items-center gap-1">
             <Input
               type={f.type === "number" ? "number" : "text"}
@@ -336,10 +336,10 @@ function ManualTab({
               onChange={(e) =>
                 onValuesChange({ ...initialValues, [f.key]: e.target.value })
               }
-              className="h-auto w-full rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-orange-400/40"
+              className="h-auto w-full rounded-lg border-border bg-background px-2.5 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
             {f.suffix ? (
-              <span className="shrink-0 text-[10px] text-white/30">{f.suffix}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{f.suffix}</span>
             ) : null}
           </div>
         </label>
@@ -404,7 +404,7 @@ function AgentTabBody({
     <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
-        className="cedar-scroll mb-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-white/8 bg-[#0a0a0a]/45 p-2"
+        className="cedar-scroll mb-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/40 p-2"
       >
         {messages.map((message) => {
           const raw = getMessageText(message);
@@ -420,7 +420,7 @@ function AgentTabBody({
                   "max-w-[min(100%,14rem)] px-2.5 py-1.5 text-left text-[11px] leading-snug shadow-sm sm:max-w-[min(72%,18rem)] sm:px-3 sm:py-2 sm:text-[12px]",
                   isUser
                     ? "rounded-[0.95rem] rounded-br-sm bg-[#0A84FF] text-white text-pretty"
-                    : "rounded-[0.95rem] rounded-bl-sm bg-[#3A3A3C] text-white/95 text-pretty",
+                    : "rounded-[0.95rem] rounded-bl-sm bg-muted text-foreground text-pretty",
                 )}
               >
                 <p className="whitespace-pre-wrap">
@@ -465,11 +465,11 @@ function AgentInputBar({
         onChange={(e) => setInput(e.target.value)}
         placeholder="Message the agent…"
         disabled={disabled}
-        className="h-auto flex-1 rounded-lg border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-white/25 disabled:opacity-50"
+        className="h-auto flex-1 rounded-lg border-border bg-background px-2.5 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:ring-ring disabled:opacity-50"
       />
       <Button
         disabled={disabled || !input.trim()}
-        className="h-auto shrink-0 rounded-lg bg-orange-500/30 px-3 py-1.5 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
+        className="h-auto shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-medium"
       >
         Send
       </Button>
@@ -576,12 +576,12 @@ function DrawModeButton({
     <Button
       variant="ghost"
       onClick={onClick}
-      className={`h-auto w-full justify-start gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-left transition ${border}`}
+      className={`h-auto w-full justify-start gap-3 rounded-xl border border-border bg-muted/35 px-4 py-3 text-left transition ${border}`}
     >
       <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} />
       <div>
-        <p className="text-[11px] font-medium text-white/80">{label}</p>
-        <p className="text-[10px] text-white/35">{description}</p>
+        <p className="text-[11px] font-medium text-foreground">{label}</p>
+        <p className="text-[10px] text-muted-foreground">{description}</p>
       </div>
     </Button>
   );
@@ -644,7 +644,7 @@ function LocationModalBody({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-white/30">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Search by address or zip code
         </p>
         <form
@@ -655,7 +655,7 @@ function LocationModalBody({
           }}
         >
           <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30" />
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={inputRef}
               value={query}
@@ -666,12 +666,12 @@ function LocationModalBody({
                 onLocationPreview?.(null);
               }}
               placeholder="e.g. 94102  or  123 Main St, Oakland CA"
-              className="h-auto w-full rounded-lg border-white/10 bg-white/5 py-2 pl-8 pr-3 text-[11px] text-white placeholder:text-white/25 focus-visible:ring-orange-400/40"
+              className="h-auto w-full rounded-lg border-border bg-background py-2 pl-8 pr-3 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
           <Button
             disabled={!query.trim() || loading}
-            className="h-auto gap-1 rounded-lg bg-orange-500/25 px-3 py-2 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
+            className="h-auto gap-1 rounded-lg px-3 py-2 text-[11px] font-medium"
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Search"}
           </Button>
@@ -683,8 +683,8 @@ function LocationModalBody({
           <div className="space-y-2">
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2">
               <p className="text-[10px] font-semibold text-emerald-400">Found</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-white/70">{result.displayName}</p>
-              <p className="mt-1 text-[10px] text-white/35">
+              <p className="mt-0.5 text-[11px] leading-snug text-foreground/80">{result.displayName}</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">
                 {result.lat.toFixed(5)}, {result.lng.toFixed(5)}
               </p>
             </div>
@@ -706,11 +706,11 @@ function LocationModalBody({
                 onConfirm?.(payload);
                 onClose();
               }}
-              className="h-auto w-full rounded-lg bg-orange-500/25 px-4 py-2 text-[11px] font-medium text-orange-200 hover:bg-orange-500/40"
+              className="h-auto w-full rounded-lg px-4 py-2 text-[11px] font-medium"
             >
               Set as project location
             </Button>
-            <p className="text-[10px] leading-snug text-white/35">
+            <p className="text-[10px] leading-snug text-muted-foreground">
               This places a {currentPlan?.cellSpaceDimension ?? 200}×
               {currentPlan?.cellSpaceDimension ?? 200}-cell grid square (
               {(((currentPlan?.cellSpaceDimension ?? 200) * (currentPlan?.cellResolution ?? 30)) / 1000).toFixed(1)}{" "}
@@ -721,9 +721,9 @@ function LocationModalBody({
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="h-px flex-1 bg-white/8" />
-        <span className="text-[9px] uppercase tracking-wider text-white/25">or place on map</span>
-        <div className="h-px flex-1 bg-white/8" />
+        <div className="h-px flex-1 bg-border" />
+        <span className="text-[9px] uppercase tracking-wider text-muted-foreground">or place on map</span>
+        <div className="h-px flex-1 bg-border" />
       </div>
 
       <div className="space-y-2">
@@ -756,7 +756,7 @@ function IgnitionModalBody({
   if (actionId === "point-ignition") {
     return (
       <div className="space-y-3">
-        <p className="text-[10px] text-white/40">
+        <p className="text-[10px] text-muted-foreground">
           Click a location on the map to place a point ignition source.
         </p>
         <DrawModeButton
@@ -775,7 +775,7 @@ function IgnitionModalBody({
 
   return (
     <div className="space-y-3">
-      <p className="text-[10px] text-white/40">
+      <p className="text-[10px] text-muted-foreground">
         Draw a line on the map to define a line ignition front.
       </p>
       <DrawModeButton
@@ -813,7 +813,7 @@ function FuelBreakModalBody({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[10px] text-white/40">
+      <p className="text-[10px] text-muted-foreground">
         Choose how to define the fuel break area on the map.
       </p>
 
@@ -915,27 +915,27 @@ export function ActionModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="themed-layer flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-white/10 bg-[#141414] p-0 text-white shadow-2xl">
-        <DialogHeader className="border-b border-white/10 px-4 py-3">
+      <DialogContent className="themed-layer flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-border bg-card p-0 text-foreground shadow-2xl">
+        <DialogHeader className="border-b border-border px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1">
-            <DialogTitle className="text-sm font-semibold text-white/90">
+            <DialogTitle className="text-sm font-semibold text-foreground">
               {cfg.title}
             </DialogTitle>
             {actionId === "location" ? (
-              <DialogDescription className="text-[11px] text-white/55">
+              <DialogDescription className="text-[11px] text-muted-foreground">
                 Search for an address or place a boundary square directly on the map.
               </DialogDescription>
             ) : actionId === "point-ignition" ? (
-              <DialogDescription className="text-[11px] text-white/55">
+              <DialogDescription className="text-[11px] text-muted-foreground">
                 Place a point ignition source on the map.
               </DialogDescription>
             ) : actionId === "line-ignition" ? (
-              <DialogDescription className="text-[11px] text-white/55">
+              <DialogDescription className="text-[11px] text-muted-foreground">
                 Draw a line ignition front on the map.
               </DialogDescription>
             ) : actionId === "fuel-break" ? (
-              <DialogDescription className="text-[11px] text-white/55">
+              <DialogDescription className="text-[11px] text-muted-foreground">
                 Choose how you want to draw the fuel break path on the map.
               </DialogDescription>
             ) : null}
@@ -944,7 +944,7 @@ export function ActionModal({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-6 rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white/80"
+                className="size-6 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label="Close"
               >
                 <X className="h-4 w-4" />
@@ -973,17 +973,17 @@ export function ActionModal({
               onValueChange={(value) => setTab(value as "agent" | "manual")}
               className="flex min-h-0 flex-1 flex-col"
             >
-              <div className="border-b border-white/8 px-0 py-2">
+              <div className="border-b border-border px-0 py-2">
                 <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-transparent p-0">
                   <TabsTrigger
                     value="agent"
-                    className="rounded-lg py-1.5 text-[11px] font-medium text-white/45 data-[state=active]:bg-orange-500/25 data-[state=active]:text-orange-200"
+                    className="rounded-lg py-1.5 text-[11px] font-medium text-muted-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-primary"
                   >
                     Agent
                   </TabsTrigger>
                   <TabsTrigger
                     value="manual"
-                    className="rounded-lg py-1.5 text-[11px] font-medium text-white/45 data-[state=active]:bg-orange-500/25 data-[state=active]:text-orange-200"
+                    className="rounded-lg py-1.5 text-[11px] font-medium text-muted-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-primary"
                   >
                     Manual
                   </TabsTrigger>
@@ -1011,7 +1011,7 @@ export function ActionModal({
                     />
                   ) : null}
                   {agentPayload ? (
-                    <pre className="mt-2 max-h-24 shrink-0 overflow-auto rounded border border-white/8 bg-black/30 p-2 text-[9px] text-emerald-400/90">
+                    <pre className="mt-2 max-h-24 shrink-0 overflow-auto rounded border border-border bg-muted/50 p-2 text-[9px] text-emerald-600 dark:text-emerald-400/90">
                       {JSON.stringify(agentPayload, null, 2)}
                     </pre>
                   ) : null}
@@ -1021,12 +1021,12 @@ export function ActionModal({
           )}
         </div>
 
-        <DialogFooter className="border-t border-white/10 px-4 py-3">
+        <DialogFooter className="border-t border-border px-4 py-3">
           <DialogClose asChild>
             <Button
               variant="ghost"
               size="sm"
-              className="h-auto rounded-lg px-3 py-1.5 text-[11px] text-white/50 hover:bg-white/5 hover:text-white/80"
+              className="h-auto rounded-lg px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               Cancel
             </Button>

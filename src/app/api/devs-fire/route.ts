@@ -1,10 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import z from "zod";
+import { z } from "zod";
 
-import { devsFirePost, toErrorMessage } from "@/mastra/tools/devsFire/_client";
+import { errorEnvelope, successEnvelope } from "@/lib/devsfire/envelope";
+import { connectToServer } from "@/lib/devsfire/endpoints";
+import { devsFireRequest } from "@/lib/devsfire/httpClient";
+import { DevsFireError } from "@/lib/devsfire/errors";
+import { ensureAuthedUser, requireSessionToken } from "@/lib/devsfire/routeHandlers";
+import { setSessionCookie } from "@/lib/devsfire/session";
 
-/** Upstream GSU server can be slow; abort avoids hanging the Next.js handler indefinitely. */
-const DEVS_FIRE_PROXY_TIMEOUT_MS = 120_000;
+export const runtime = "nodejs";
+export const maxDuration = 360;
 
 const queryValueSchema = z.union([
   z.string(),
@@ -15,62 +19,70 @@ const queryValueSchema = z.union([
 
 const requestSchema = z.object({
   path: z.string().min(1),
-  token: z.string().optional(),
   params: z.record(z.string(), queryValueSchema).optional(),
   body: z.unknown().optional(),
   headers: z.record(z.string(), z.string()).optional(),
 });
 
-export const runtime = "nodejs";
+function normalizePath(path: string): string {
+  if (!path.startsWith("/")) {
+    return `/${path}`;
+  }
+  return path;
+}
 
-export async function POST(request: NextRequest) {
+function isConnectPath(path: string): boolean {
+  const normalized = normalizePath(path).replace(/\/+$/, "");
+  return normalized === "/connectToServer";
+}
+
+export async function POST(request: Request) {
   try {
-    const json = await request.json();
-    const payload = requestSchema.parse(json);
+    await ensureAuthedUser();
+    const body = requestSchema.parse(await request.json());
+    const path = normalizePath(body.path);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DEVS_FIRE_PROXY_TIMEOUT_MS);
-
-    let data: unknown;
-    try {
-      data = await devsFirePost(
-        payload.path,
-        payload.token,
-        payload.params ?? {},
-        payload.body,
-        payload.headers ?? {},
-        { signal: controller.signal },
-      );
-    } finally {
-      clearTimeout(timeoutId);
+    if (isConnectPath(path)) {
+      const { token } = await connectToServer();
+      const response = successEnvelope(request, { connected: true });
+      setSessionCookie(response, token);
+      return response;
     }
 
-    return NextResponse.json({ data });
+    const userToken = requireSessionToken(request);
+    const data = await devsFireRequest({
+      endpoint: path,
+      userToken,
+      query: body.params,
+      body: body.body,
+      headers: body.headers,
+    });
+
+    return successEnvelope(request, { data });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-    if (error instanceof Error && error.name === "AbortError") {
-      return NextResponse.json(
-        {
-          error: `DEVS-FIRE request timed out after ${DEVS_FIRE_PROXY_TIMEOUT_MS / 1000}s.`,
-        },
-        { status: 504 },
+      return errorEnvelope(
+        request,
+        new DevsFireError({
+          type: "SimulationError",
+          message: "Invalid request payload.",
+          details: error.message,
+          status: 400,
+        }),
       );
     }
-    const message = toErrorMessage(error);
-    const upstreamOrNetwork =
-      message.includes("DEVS-FIRE request failed") || message.includes("fetch failed");
-    return NextResponse.json(
-      { error: message },
-      { status: upstreamOrNetwork ? 502 : 500 },
-    );
+    return errorEnvelope(request, error);
   }
 }
 
-export async function GET() {
-  return NextResponse.json(
-    { error: "Use POST for DEVS-FIRE proxy requests." },
-    { status: 405 },
+export async function GET(request: Request) {
+  return errorEnvelope(
+    request,
+    new DevsFireError({
+      type: "SimulationError",
+      message: "Use POST for DEVS-FIRE proxy requests.",
+      status: 405,
+    }),
+    405,
   );
 }

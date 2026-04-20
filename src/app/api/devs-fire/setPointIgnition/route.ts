@@ -1,0 +1,26 @@
+import { z } from "zod";
+
+import { setPointIgnition } from "@/lib/devsfire/endpoints";
+import {
+  ensureAuthedUser,
+  parseJsonBody,
+  requireSessionToken,
+  withRouteEnvelope,
+} from "@/lib/devsfire/routeHandlers";
+
+const bodySchema = z.object({
+  xs: z.string().min(1),
+  ys: z.string().min(1),
+});
+
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
+  return withRouteEnvelope(request, async () => {
+    await ensureAuthedUser();
+    const userToken = requireSessionToken(request);
+    const body = await parseJsonBody(request, bodySchema);
+    await setPointIgnition({ userToken, ...body });
+    return { updated: true };
+  });
+}

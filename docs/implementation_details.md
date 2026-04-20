@@ -22,7 +22,7 @@ This document provides a technical overview of the classes, files, and environme
 
 ### Prerequisites
 - **Runtime**: [Node.js](https://nodejs.org/) (v20+) or [Bun](https://bun.sh/) (recommended).
-- **Package Manager**: `npm` or `bun`.
+- **Package Manager**: `bun`.
 - **API Keys**: Access to OpenRouter (for LLM) and Clerk (for Auth).
 
 ### Project Setup
@@ -33,8 +33,6 @@ This document provides a technical overview of the classes, files, and environme
    ```
 2. **Install dependencies**:
    ```bash
-   npm install
-   # or
    bun install
    ```
 3. **Environment Variables**:
@@ -48,7 +46,7 @@ This document provides a technical overview of the classes, files, and environme
    ```
 4. **Run the development server**:
    ```bash
-   npm run dev
+   bun dev
    ```
    The application will be available at `http://localhost:3000`.
 
@@ -65,3 +63,58 @@ The frontend uses a custom regex parser to detect blocks like ```setup-update { 
 Project data is saved to **Supabase** in a two-tier approach:
 1. **Metadata**: Project name, center coordinates, and weather parameters are saved in a relational table.
 2. **Simulation Results**: Large blobs of simulation data are stored as JSON strings or files, allowing for the "Replay" functionality.
+
+## 4. DEVS-FIRE upstream (GSU)
+
+### Branch parity
+
+As of the latest work, `main` and `feat/agent-devsfire` point at the same commit (`d595a12`). There is no code divergence between those branches for DEVS-FIRE behavior.
+
+### Historical behavior (git)
+
+- **`80d0460`**: Mastra `connectToServer` switched from **`devsFireProxyPost`** (self-HTTP to this app’s `/api/devs-fire`) to **`connectToDevsFire`** / direct **`devsFirePost`** to the research server. The default base URL moved from **`http://firesim.cs.gsu.edu:8084/api`** to **`https://firesim.cs.gsu.edu/api`**. Added **`src/app/api/devs-fire/smoke/route.ts`** as a minimal connectivity probe.
+- **`eb2388a`**: Added **`scripts/devsfire-connect.mjs`**, HTML-vs-token checks, and **`normalizeDevsFireBaseUrl`** in **`src/mastra/tools/devsFire/_client.ts`** so legacy GSU URLs (e.g. root host or deprecated `:8084/api`) map to the canonical HTTPS API base.
+
+Canonical base and normalization live in **`src/mastra/tools/devsFire/_client.ts`** (`DEVS_FIRE_CANONICAL_BASE_URL`). Server-side simulation uses **`devsFirePost`** directly; the browser uses **`src/lib/devsFireBrowser.ts`** → **`/api/devs-fire`** → same upstream.
+
+### How to verify connectivity
+
+1. **Direct upstream (no Next.js)** — from the same machine/network as the failing server:
+
+   ```bash
+   bun run devsfire:connect
+   ```
+
+   Optional explicit base (must include `/api` for the canonical host):
+
+   ```bash
+   bun scripts/devsfire-connect.mjs "https://firesim.cs.gsu.edu/api"
+   ```
+
+   JSON output for CI/evidence capture:
+
+   ```bash
+   bun run devsfire:connect --json
+   ```
+
+2. **Through the app** — with `bun dev` running:
+
+   ```bash
+   curl -sS -m 200 "http://127.0.0.1:3000/api/devs-fire/smoke"
+   ```
+
+   The smoke route calls **`connectToDevsFire()`** and returns JSON (`ok`, `baseUrl`, latency, or classified error). Use a long client timeout (default upstream timeout is large — see **`DEVS_FIRE_REQUEST_TIMEOUT_MS`** / **`DEFAULT_DEVS_FIRE_REQUEST_TIMEOUT_MS`** in **`src/mastra/tools/devsFire/config.ts`**).
+
+3. **Deep diagnostics (protected)** — requires **`DEVS_FIRE_DIAGNOSTICS_KEY`**:
+
+   ```bash
+   curl -sS -m 200 \
+     -H "Authorization: Bearer $DEVS_FIRE_DIAGNOSTICS_KEY" \
+     "http://127.0.0.1:3000/api/devs-fire/diagnostics"
+   ```
+
+   This returns connect-attempt telemetry (`method`, `url`, status, timing, content type, redirect location, token/html detection) plus final classification (`success`, `upstream_timeout`, `upstream_unreachable`, `upstream_http_error`, `upstream_html_response`, `invalid_connect_payload`).
+
+### Comparing environments
+
+If **local** probes succeed and **deployed** (e.g. Vercel) fails, suspect **egress IP** or network policy on the host: the browser VPN does not change the server’s outbound IP. If both fail with **HTML** or **non-JSON** bodies, the upstream may be returning a block page, login page, or nginx error — see error strings in **`src/mastra/tools/devsFire/_client.ts`** and **`src/lib/api/simulationErrors.ts`**.

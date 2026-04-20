@@ -1,59 +1,119 @@
 import "server-only";
 
 import type { WeatherValues } from "@/components/weather/WeatherPreview";
+import { validateAllCoordinates } from "@/lib/devsFireCoordinateValidation";
 import {
-  devsFirePost,
-  parseSimulationOperationsResponse,
+  buildIgnitionDispatchCommands,
+  enforcePointIgnitionLimit,
+} from "@/lib/devsFireIgnitionDispatch";
+import {
+  DEVS_FIRE_BASE_URL,
 } from "@/mastra/tools/devsFire/_client";
-import type { z } from "zod";
-
-import { simulationOperationListSchema } from "@/mastra/tools/devsFire/_client";
+import {
+  computeBurnedArea,
+  computePerimeterLength,
+  connectToServer,
+  getBurningCellNum,
+  getPerimeterCells,
+  getUnburnedCellNum,
+  loadAspect,
+  loadFuel,
+  loadSlope,
+  loadWindFlow,
+  runSimulation,
+  setCellResolution,
+  setCellSpaceLocation,
+  setDynamicIgnition,
+  setPointIgnition,
+  setSuppressedCell,
+  setMultiParameters,
+  setWindCondition,
+  simulationOperationListSchema,
+} from "@/lib/devsfire/endpoints";
+import type { HourlyWeatherPoint } from "@/mastra/tools/weather/base";
 import type { IgnitionPlan } from "@/types/ignitionPlan";
+import type {
+  DevsFireCallRecord,
+  LatestSimulationFinalMetrics,
+  LatestSimulationManifest,
+} from "@/types/latestSimulation";
+import type { z } from "zod";
 
 export type RunDevsFireResult = {
   userToken: string;
   operations: z.infer<typeof simulationOperationListSchema>;
   bbox: [number, number, number, number];
-  weatherSource: "dynamic";
+  weatherSource: "dynamic" | "plan";
+  manifest: LatestSimulationManifest;
+  finalMetrics: LatestSimulationFinalMetrics;
 };
 
 const SUPPRESSED_CELL_BATCH_SIZE = 50;
+const TIMESTEPS_PER_HOUR = 500;
+const ENABLE_DEVS_FIRE_WINDFLOW =
+  process.env.DEVS_FIRE_ENABLE_WINDFLOW === "1" ||
+  process.env.DEVS_FIRE_ENABLE_WINDFLOW?.toLowerCase() === "true";
+const ENABLE_DEVS_FIRE_MULTI_PARAMETERS =
+  process.env.DEVS_FIRE_USE_MULTI_PARAMETERS === "1" ||
+  process.env.DEVS_FIRE_USE_MULTI_PARAMETERS?.toLowerCase() === "true";
+
+const CONNECT_RETRY_ATTEMPTS = 3;
+const RUN_SIMULATION_RETRY_ATTEMPTS = 2;
+const RETRY_BASE_DELAY_MS = 1_000;
 
 export function meteoToDevsFireWindDirection(meteoDirection: number): number {
   return (meteoDirection + 180) % 360;
 }
 
-function parseToken(data: unknown): string {
-  const isHtmlLikeToken = (value: string): boolean => {
-    const trimmed = value.trimStart().toLowerCase();
-    return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
-  };
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  if (typeof data === "string") {
-    const t = data.trim();
-    if (t) {
-      if (isHtmlLikeToken(t)) {
-        throw new Error(
-          "DEVS-FIRE connectToServer returned HTML instead of a token. Check DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
-        );
+function isRetryableDevsFireError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("timed out") ||
+    message.includes("timeout") ||
+    message.includes("abort") ||
+    message.includes("fetch failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    /request failed for .*: 5\d\d/.test(message)
+  );
+}
+
+async function withDevsFireRetry<T>(
+  label: string,
+  attempts: number,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const shouldRetry =
+        attempt < attempts && isRetryableDevsFireError(error);
+      if (!shouldRetry) {
+        throw error;
       }
-      return t;
+      const waitMs = RETRY_BASE_DELAY_MS * attempt;
+      const message =
+        error instanceof Error ? error.message : "Unknown DEVS-FIRE error";
+      console.warn(
+        `[devs-fire] ${label} attempt ${attempt}/${attempts} failed; retrying in ${waitMs}ms`,
+        message,
+      );
+      await sleep(waitMs);
     }
   }
-  if (data && typeof data === "object") {
-    const o = data as Record<string, unknown>;
-    const token = o.token ?? o.userToken;
-    if (typeof token === "string" && token.trim()) {
-      const trimmed = token.trim();
-      if (isHtmlLikeToken(trimmed)) {
-        throw new Error(
-          "DEVS-FIRE connectToServer returned HTML instead of a token. Check DEVS_FIRE_BASE_URL (expected https://firesim.cs.gsu.edu/api).",
-        );
-      }
-      return trimmed;
-    }
-  }
-  throw new Error("DEVS-FIRE connectToServer response did not include a token");
+
+  throw (lastError instanceof Error
+    ? lastError
+    : new Error(`DEVS-FIRE ${label} failed after ${attempts} attempts.`));
 }
 
 /**
@@ -66,29 +126,6 @@ export function planPointToDevsFirePointIgnition(xsCols: number[], ysRows: numbe
     xs: xsCols.map(String).join(","),
     ys: ysRows.map(String).join(","),
   };
-}
-
-export function planSegmentToDynamicIgnition(seg: {
-  start_x: number;
-  start_y: number;
-  end_x: number;
-  end_y: number;
-}) {
-  // DEVS-FIRE setDynamicIgnition expects x=row and y=column.
-  // IgnitionPlan stores x=column and y=row.
-  return {
-    x1: seg.start_y,
-    y1: seg.start_x,
-    x2: seg.end_y,
-    y2: seg.end_x,
-  };
-}
-
-
-function mapIgnitionMode(mode: string): string {
-  const m = mode.toLowerCase();
-  if (m.includes("point") || m.includes("spot")) return "spot";
-  return "continuous";
 }
 
 function bresenhamLine(
@@ -156,10 +193,112 @@ function bboxFromPlan(plan: IgnitionPlan): [number, number, number, number] {
   ];
 }
 
+function normalizeMatrixRows(value: unknown): number[][] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const rows: number[][] = [];
+  for (const row of value) {
+    if (!Array.isArray(row) || row.length === 0) continue;
+    const next = row
+      .map((cell) => Number(cell))
+      .filter((cell) => Number.isFinite(cell));
+    if (next.length === row.length) {
+      rows.push(next);
+    }
+  }
+  return rows;
+}
+
+function matrixToText(rows: number[][]): string {
+  return rows.map((row) => row.join("\t")).join("\n");
+}
+
+function resolveFuelMapContent(plan: IgnitionPlan): string | null {
+  const fromString = plan.customizedFuelGrid?.trim();
+  if (fromString) {
+    return fromString;
+  }
+  const rows = normalizeMatrixRows(plan.fuel_data_adjusted);
+  if (rows.length === 0) return null;
+  return matrixToText(rows);
+}
+
+function resolveSlopeMapContent(plan: IgnitionPlan): string | null {
+  const rows = normalizeMatrixRows(plan.slope_data_adjusted);
+  if (rows.length === 0) return null;
+  return matrixToText(rows);
+}
+
+function resolveAspectMapContent(plan: IgnitionPlan): string | null {
+  const rows = normalizeMatrixRows(plan.aspect_data_adjusted);
+  if (rows.length === 0) return null;
+  return matrixToText(rows);
+}
+
+function buildWindflowContent(
+  hourlyWeather: HourlyWeatherPoint[],
+  simulationTimesteps: number,
+): string | null {
+  if (!hourlyWeather.length) return null;
+  const durationHours = Math.max(1, Math.ceil(simulationTimesteps / TIMESTEPS_PER_HOUR));
+  const rowCount = Math.min(durationHours, hourlyWeather.length);
+  if (rowCount <= 0) return null;
+
+  const rows = hourlyWeather.slice(0, rowCount).map((point, hour) => {
+    const windDirection = Number(
+      meteoToDevsFireWindDirection(point.windDirection).toFixed(2),
+    );
+    return `${hour}\t0\t${Number(point.temperature.toFixed(2))}\t${Number(point.windSpeed.toFixed(2))}\t${windDirection}`;
+  });
+
+  return [
+    "5",
+    String(rowCount),
+    "hour\tminute\ttemperature\twind_speed\twind_direction",
+    ...rows,
+  ].join("\n");
+}
+
+async function safeNumericEndpoint(
+  userToken: string,
+  path: string,
+): Promise<number | null> {
+  try {
+    switch (path) {
+      case "/computeBurnedArea/":
+        return await computeBurnedArea({ userToken });
+      case "/computePerimeterLength/":
+        return await computePerimeterLength({ userToken });
+      case "/getBurningCellNum/":
+        return await getBurningCellNum({ userToken });
+      case "/getUnburnedCellNum/":
+        return await getUnburnedCellNum({ userToken });
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function safePerimeterCells(userToken: string): Promise<string[]> {
+  try {
+    return await getPerimeterCells({ userToken });
+  } catch {
+    return [];
+  }
+}
+
 export type RunDevsFireInput = {
   plan: IgnitionPlan;
   weather: WeatherValues;
+  weatherFetched?: WeatherValues;
+  weatherOverrideApplied?: string[];
+  hourlyWeather?: HourlyWeatherPoint[];
+  weatherSource?: "dynamic" | "plan";
   simulationHours: number;
+  projectId?: string;
 };
 
 /**
@@ -169,126 +308,338 @@ export type RunDevsFireInput = {
 export async function executeDevsFireSimulation(
   input: RunDevsFireInput,
 ): Promise<RunDevsFireResult> {
-  const { plan, weather, simulationHours: simulationTimesteps } = input;
+  const startedAt = new Date().toISOString();
+  const {
+    plan,
+    weather,
+    weatherFetched = weather,
+    weatherOverrideApplied = [],
+    hourlyWeather = [],
+    weatherSource = "dynamic",
+    simulationHours: simulationTimesteps,
+  } = input;
 
-  if (!plan.proj_center_lat || !plan.proj_center_lng) {
+  const fuelContent = resolveFuelMapContent(plan);
+  const slopeContent = resolveSlopeMapContent(plan);
+  const aspectContent = resolveAspectMapContent(plan);
+  const usesCustomTerrain = Boolean(fuelContent || slopeContent || aspectContent);
+
+  if (!usesCustomTerrain && (!plan.proj_center_lat || !plan.proj_center_lng)) {
     throw new Error("Project center (proj_center_lat / proj_center_lng) is required.");
   }
 
-  const rawConnect = await devsFirePost(
-    "/connectToServer",
-    undefined,
-    {},
-    "connect",
-    { "Content-Type": "text/plain" },
+  const setupCalls: DevsFireCallRecord[] = [];
+  const executionCalls: DevsFireCallRecord[] = [];
+
+  let lastStepLabel = "connectToServer";
+  const withStep = async <T>(path: string, action: () => Promise<T>): Promise<T> => {
+    lastStepLabel = path;
+    return action();
+  };
+
+  const connectResult = await withDevsFireRetry(
+    "connectToServer",
+    CONNECT_RETRY_ATTEMPTS,
+    () => connectToServer(),
   );
-  const userToken = parseToken(rawConnect);
+  const userToken = connectResult.token;
 
-  const cellDimension = Math.max(
-    plan.cellSpaceDimension,
-    plan.cellSpaceDimensionLat,
-  );
-  const devsFireWindDirection = meteoToDevsFireWindDirection(weather.windDirection);
+  const cellDimension = Math.max(plan.cellSpaceDimension, plan.cellSpaceDimensionLat);
 
-  await devsFirePost("/setCellResolution/", userToken, {
-    cellResolution: plan.cellResolution,
-    cellDimension,
-  });
+  // Pre-validate all coordinates before making any DEVS-FIRE calls.
+  // Build the dispatch early so we can check ignition coords too.
+  const ignitionDispatch = buildIgnitionDispatchCommands(plan);
+  enforcePointIgnitionLimit(ignitionDispatch.pointIgnitionCount);
+  validateAllCoordinates(plan, ignitionDispatch.commands, cellDimension);
 
-  await devsFirePost("/setCellSpaceLocation/", userToken, {
-    lat: plan.proj_center_lat,
-    lng: plan.proj_center_lng,
-  });
+  try {
 
-  await devsFirePost("/setWindCondition/", userToken, {
-    windSpeed: weather.windSpeed,
-    windDirection: devsFireWindDirection,
-  });
+  let usedMultiParameters = false;
+  if (ENABLE_DEVS_FIRE_MULTI_PARAMETERS && !usesCustomTerrain) {
+    try {
+      setupCalls.push({
+        path: "/setMultiParameters/",
+        params: {
+          lat: plan.proj_center_lat,
+          lng: plan.proj_center_lng,
+          windSpeed: weather.windSpeed,
+          windDirection: meteoToDevsFireWindDirection(weather.windDirection),
+          cellResolution: plan.cellResolution,
+          cellDimension,
+        },
+      });
+      await withStep("/setMultiParameters/", () =>
+        setMultiParameters({
+          userToken,
+          lat: plan.proj_center_lat,
+          lng: plan.proj_center_lng,
+          windSpeed: weather.windSpeed,
+          windDirection: meteoToDevsFireWindDirection(weather.windDirection),
+          cellResolution: plan.cellResolution,
+          cellDimension,
+        }),
+      );
+      usedMultiParameters = true;
+    } catch {
+      usedMultiParameters = false;
+    }
+  }
+
+  if (!usedMultiParameters) {
+    setupCalls.push({
+      path: "/setCellResolution/",
+      params: {
+        cellResolution: plan.cellResolution,
+        cellDimension,
+      },
+    });
+    await withStep("/setCellResolution/", () =>
+      setCellResolution({
+        userToken,
+        cellResolution: plan.cellResolution,
+        cellDimension,
+      }),
+    );
+  }
+
+  if (usesCustomTerrain) {
+    if (fuelContent) {
+      setupCalls.push({
+        path: "/loadFuel/",
+        params: { fuelMap: "fuel.txt" },
+        bodyType: "text",
+      });
+      await withStep("/loadFuel/", () =>
+        loadFuel({
+          userToken,
+          fileName: "fuel.txt",
+          fileContent: fuelContent,
+        }),
+      );
+    }
+    if (slopeContent) {
+      setupCalls.push({
+        path: "/loadSlope/",
+        params: { slopeMap: "slope.txt" },
+        bodyType: "text",
+      });
+      await withStep("/loadSlope/", () =>
+        loadSlope({
+          userToken,
+          fileName: "slope.txt",
+          fileContent: slopeContent,
+        }),
+      );
+    }
+    if (aspectContent) {
+      setupCalls.push({
+        path: "/loadAspect/",
+        params: { aspectMap: "aspect.txt" },
+        bodyType: "text",
+      });
+      await withStep("/loadAspect/", () =>
+        loadAspect({
+          userToken,
+          fileName: "aspect.txt",
+          fileContent: aspectContent,
+        }),
+      );
+    }
+  } else if (!usedMultiParameters) {
+    setupCalls.push({
+      path: "/setCellSpaceLocation/",
+      params: {
+        lat: plan.proj_center_lat,
+        lng: plan.proj_center_lng,
+      },
+    });
+    await withStep("/setCellSpaceLocation/", () =>
+      setCellSpaceLocation({
+        userToken,
+        lat: plan.proj_center_lat,
+        lng: plan.proj_center_lng,
+      }),
+    );
+  }
+
+  const windflowContent = ENABLE_DEVS_FIRE_WINDFLOW
+    ? buildWindflowContent(hourlyWeather, simulationTimesteps)
+    : null;
+  let weatherMode: "static" | "windflow" = "static";
+  let shouldApplyStaticWind = !usedMultiParameters;
+  if (windflowContent) {
+    try {
+      setupCalls.push({
+        path: "/loadWindFlow/",
+        params: { weatherMap: "weather_artificial.txt" },
+        bodyType: "text",
+      });
+      await withStep("/loadWindFlow/", () =>
+        loadWindFlow({
+          userToken,
+          fileName: "weather_artificial.txt",
+          fileContent: windflowContent,
+        }),
+      );
+      weatherMode = "windflow";
+      shouldApplyStaticWind = false;
+    } catch {
+      // Fallback to static wind so simulation still runs if windflow upload is rejected.
+      shouldApplyStaticWind = true;
+    }
+  }
+  if (shouldApplyStaticWind) {
+    const devsFireWindDirection = meteoToDevsFireWindDirection(weather.windDirection);
+    setupCalls.push({
+      path: "/setWindCondition/",
+      params: {
+        windSpeed: weather.windSpeed,
+        windDirection: devsFireWindDirection,
+      },
+    });
+    await withStep("/setWindCondition/", () =>
+      setWindCondition({
+        userToken,
+        windSpeed: weather.windSpeed,
+        windDirection: devsFireWindDirection,
+      }),
+    );
+  }
 
   for (const sup of plan.sup_infos) {
-    const points = bresenhamLine(sup.x1, sup.y1, sup.x2, sup.y2, 1);
+    // Plan stores x=column, y=row; DEVS-FIRE setSuppressedCell expects x=row, y=column.
+    // Swap coordinates to match the same convention used by planSegmentToDynamicIgnition.
+    const dfX1 = sup.y1;
+    const dfY1 = sup.x1;
+    const dfX2 = sup.y2;
+    const dfY2 = sup.x2;
+    const points = bresenhamLine(dfX1, dfY1, dfX2, dfY2, 1);
+    setupCalls.push({
+      path: "/setSuppressedCell/",
+      params: {
+        x1: dfX1,
+        y1: dfY1,
+        x2: dfX2,
+        y2: dfY2,
+        pointCount: points.length,
+      },
+    });
     for (let i = 0; i < points.length; i += SUPPRESSED_CELL_BATCH_SIZE) {
       const chunk = points.slice(i, i + SUPPRESSED_CELL_BATCH_SIZE);
       await Promise.all(
         chunk.map((point) =>
-          devsFirePost("/setSuppressedCell/", userToken, {
-            x1: point.x,
-            y1: point.y,
-            x2: point.x,
-            y2: point.y,
-          }),
+          withStep("/setSuppressedCell/", () =>
+            setSuppressedCell({
+              userToken,
+              x1: point.x,
+              y1: point.y,
+              x2: point.x,
+              y2: point.y,
+            }),
+          ),
         ),
       );
     }
   }
 
-  for (const team of plan.team_infos) {
-    const pointCols: number[] = [];
-    const pointRows: number[] = [];
-    let dynamicPathIndex = 0; // Tracks sequence of paths for the SAME team
+  // ignitionDispatch was already built and validated before the try block.
 
-    for (const seg of team.details) {
-      const isPoint =
-        seg.start_x === seg.end_x && seg.start_y === seg.end_y;
-      const isStaticPoint = isPoint && seg.mode.includes("_static");
-
-      if (isStaticPoint) {
-        if (isPoint) {
-          pointCols.push(seg.start_x);
-          pointRows.push(seg.start_y);
-        } else {
-          const spacing =
-            seg.mode === "point_static" && seg.distance && seg.distance > 0
-              ? seg.distance
-              : 1;
-          const points = bresenhamLine(seg.start_x, seg.start_y, seg.end_x, seg.end_y, spacing);
-          for (const p of points) {
-            pointCols.push(p.x);
-            pointRows.push(p.y);
-          }
-        }
-      } else {
-        const i1 = dynamicPathIndex * 2 + 1; // x1, x3, x5...
-        const i2 = dynamicPathIndex * 2 + 2; // x2, x4, x6...
-        const mapped = planSegmentToDynamicIgnition(seg);
-        const dynParams: Record<string, number> = {
-          [`x${i1}`]: mapped.x1,
-          [`y${i1}`]: mapped.y1,
-          [`x${i2}`]: mapped.x2,
-          [`y${i2}`]: mapped.y2,
-        };
-        
-        await devsFirePost("/setDynamicIgnition/", userToken, {
-          teamNum: team.team_name,
-          ...dynParams,
-          speed: seg.speed,
-          mode: mapIgnitionMode(seg.mode),
-          distance:
-            seg.mode === "continuous_static"
-              ? (seg.distance && seg.distance > 0 ? seg.distance : 5)
-              : seg.distance ?? undefined,
-        });
-
-        dynamicPathIndex++;
-      }
+  for (const command of ignitionDispatch.commands) {
+    if (command.kind === "setPointIgnition") {
+      const { xs, ys } = planPointToDevsFirePointIgnition(command.xs, command.ys);
+      setupCalls.push({
+        path: "/setPointIgnition/",
+        params: { xs, ys },
+      });
+      await withStep("/setPointIgnition/", () =>
+        setPointIgnition({ userToken, xs, ys }),
+      );
+      continue;
     }
-    if (pointCols.length > 0) {
-      const { xs, ys } = planPointToDevsFirePointIgnition(pointCols, pointRows);
-      await devsFirePost("/setPointIgnition/", userToken, { xs, ys });
+
+    const dynParams: Record<string, number | string> = {
+      x1: command.x1,
+      y1: command.y1,
+      x2: command.x2,
+      y2: command.y2,
+      teamNum: command.teamName,
+      speed: command.speed,
+      mode: command.mode,
+    };
+    if (typeof command.distance === "number" && Number.isFinite(command.distance)) {
+      dynParams.distance = command.distance;
     }
+    setupCalls.push({
+      path: "/setDynamicIgnition/",
+      params: dynParams,
+    });
+    await withStep("/setDynamicIgnition/", () =>
+      setDynamicIgnition({
+        userToken,
+        teamNum: String(dynParams.teamNum),
+        x1: Number(dynParams.x1),
+        y1: Number(dynParams.y1),
+        x2: Number(dynParams.x2),
+        y2: Number(dynParams.y2),
+        speed: Number(dynParams.speed),
+        mode: typeof dynParams.mode === "string" ? dynParams.mode : undefined,
+        distance:
+          typeof dynParams.distance === "number" ? dynParams.distance : undefined,
+      }),
+    );
   }
 
   // DEVS-FIRE time scale: 1 timestep = roughly 1 second of real fire spread
   const timeSteps = Math.max(1, Math.min(100_000, Math.floor(simulationTimesteps)));
-  const runData = await devsFirePost("/runSimulation/", userToken, {
-    time: timeSteps,
+  executionCalls.push({
+    path: "/runSimulation/",
+    params: { time: timeSteps },
   });
-  const operations = parseSimulationOperationsResponse(runData, "/runSimulation/");
+  const operations = await withDevsFireRetry(
+    "runSimulation",
+    RUN_SIMULATION_RETRY_ATTEMPTS,
+    () => withStep("/runSimulation/", () => runSimulation({ userToken, time: timeSteps })),
+  );
+
+  const finalMetrics: LatestSimulationFinalMetrics = {
+    perimeterCells: await safePerimeterCells(userToken),
+    burnedArea: await safeNumericEndpoint(userToken, "/computeBurnedArea/"),
+    perimeterLength: await safeNumericEndpoint(userToken, "/computePerimeterLength/"),
+    burningCells: await safeNumericEndpoint(userToken, "/getBurningCellNum/"),
+    unburnedCells: await safeNumericEndpoint(userToken, "/getUnburnedCellNum/"),
+  };
+
+  const completedAt = new Date().toISOString();
+  const manifest: LatestSimulationManifest = {
+    startedAt,
+    completedAt,
+    baseUrl: DEVS_FIRE_BASE_URL,
+    projectId: input.projectId ?? "unknown-project",
+    terrainMode: usesCustomTerrain ? "custom" : "online",
+    weatherMode,
+    planSnapshot: plan,
+    weatherFetched,
+    weatherUsed: weather,
+    weatherOverrideApplied,
+    setupCalls,
+    executionCalls,
+  };
 
   return {
     userToken,
     operations,
     bbox: bboxFromPlan(plan),
-    weatherSource: "dynamic",
+    weatherSource,
+    manifest,
+    finalMetrics,
   };
+
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[devs-fire] Simulation failed at step "${lastStepLabel}" (project: ${input.projectId ?? "unknown"}):`,
+      msg,
+    );
+    throw error;
+  }
 }

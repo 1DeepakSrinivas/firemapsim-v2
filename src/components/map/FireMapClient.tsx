@@ -28,6 +28,7 @@ import type {
 import type { MapStyleId } from "./MapOverlayPanels";
 import type { MapInteractionMode, MapInteractionLayerProps } from "./MapInteractionLayer";
 import { MapInteractionLayer } from "./MapInteractionLayer";
+import { useTheme } from "@/components/theme/ThemeProvider";
 
 const DEFAULT_CENTER: [number, number] = [37.7749, -122.4194];
 const DEFAULT_ZOOM = 13;
@@ -39,28 +40,27 @@ const US_MAX_BOUNDS: [[number, number], [number, number]] = [
 ];
 const US_MIN_ZOOM = 4;
 
+const OSM_ATTRIBUTION =
+  '&copy; OpenStreetMap <a href="https://www.openstreetmap.org/copyright">contributors</a>';
+
 const TILE_LAYERS: Record<MapStyleId, { url: string; attribution: string }> = {
   terrain: {
     url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    attribution: OSM_ATTRIBUTION,
   },
   street: {
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution: OSM_ATTRIBUTION,
   },
   satellite: {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attribution:
-      "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+    attribution: OSM_ATTRIBUTION,
   },
 };
 
 const SATELLITE_LABELS_LAYER = {
   url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-  attribution:
-    "Labels &copy; Esri &mdash; Source: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), NOSTRA, and OpenStreetMap contributors",
+  attribution: OSM_ATTRIBUTION,
 };
 
 export type FireMapClientProps = {
@@ -218,6 +218,8 @@ function MapEventsBridge({
   });
 
   useEffect(() => {
+    // Keep attribution minimal: only show tile attribution text (no "Leaflet" prefix).
+    map.attributionControl?.setPrefix(false);
     onMapReady?.(map);
     onBoundsChange?.(toBoundsPayload(map));
   }, [map, onBoundsChange, onMapReady]);
@@ -532,7 +534,17 @@ export default function FireMapClient({
   squareHeightM,
 }: FireMapClientProps) {
   const perimeter = useMemo(() => toPolylinePositions(perimeterGeoJSON), [perimeterGeoJSON]);
-  const tile = TILE_LAYERS[mapStyle];
+  const { resolvedTheme } = useTheme();
+  const tile = useMemo(() => {
+    if (mapStyle !== "terrain") return TILE_LAYERS[mapStyle];
+    return {
+      url:
+        resolvedTheme === "dark"
+          ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+      attribution: OSM_ATTRIBUTION,
+    };
+  }, [mapStyle, resolvedTheme]);
 
   const interactionAccentColor =
     interactionPalette === "fuel-break"
@@ -552,7 +564,11 @@ export default function FireMapClient({
         minZoom={US_MIN_ZOOM}
         className="h-full w-full"
       >
-        <TileLayer key={mapStyle} url={tile.url} attribution={tile.attribution} />
+        <TileLayer
+          key={`${mapStyle}-${mapStyle === "terrain" ? resolvedTheme : "fixed"}`}
+          url={tile.url}
+          attribution={tile.attribution}
+        />
         {mapStyle === "satellite" && (
           <TileLayer
             key="satellite-labels"
