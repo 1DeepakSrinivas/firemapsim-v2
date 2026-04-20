@@ -8,7 +8,6 @@ import {
   BookOpen,
   Check,
   Clock,
-  LayoutGrid,
   Loader2,
   Map,
   MapPin,
@@ -23,6 +22,7 @@ import { toast } from "sonner";
 import { computeUrlSlugFromClerk } from "@/lib/url-slug";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { LogoMarkIcon } from "@/components/brand/LogoMarkIcon";
+import { Footer } from "@/components/layout/Footer";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -193,38 +193,33 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <header className="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-stroke-secondary/40 bg-card/95 px-3 backdrop-blur-sm sm:h-12 sm:px-4">
-        <div className="flex items-center gap-2 justify-self-center sm:gap-3">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md border border-stroke-primary/45 bg-primary/15 sm:h-7 sm:w-7 sm:rounded-lg">
-            <LogoMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" alt="FireMapSim-v2" />
+    <main className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="shrink-0 border-b border-stroke-secondary/40 bg-card/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-10 w-full max-w-5xl items-center justify-between px-4 sm:h-12 sm:px-6">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md border border-stroke-primary/45 bg-primary/15 sm:h-7 sm:w-7 sm:rounded-lg">
+              <LogoMarkIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" alt="FireMapSim-v2" />
+            </div>
+            <span className="text-[10px] font-bold tracking-widest text-foreground/80 uppercase sm:text-xs">
+              <span className="hidden sm:inline">FireMapSim-v2</span>
+              <span className="sm:hidden">FMS-v2</span>
+            </span>
           </div>
-          <span className="text-[10px] font-bold tracking-widest text-foreground/80 uppercase sm:text-xs">
-            <span className="hidden sm:inline">FireMapSim-v2</span>
-            <span className="sm:hidden">FMS-v2</span>
-          </span>
-        </div>
 
-        <nav className="flex items-center gap-0.5 sm:gap-1">
-          <span className="flex items-center gap-1 rounded-md border border-stroke-secondary/35 bg-primary/12 px-2 py-1 text-[10px] font-medium text-primary sm:gap-1.5 sm:px-3 sm:py-1.5 sm:text-xs">
-            <LayoutGrid className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-            Home
-          </span>
-        </nav>
-
-        <div className="flex items-center gap-1 justify-self-center sm:gap-2">
-          <ThemeSwitcher />
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "h-6 w-6 sm:h-7 sm:w-7",
-              },
-            }}
-          />
+          <div className="flex items-center gap-1 sm:gap-2">
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "h-6 w-6 sm:h-7 sm:w-7",
+                },
+              }}
+            />
+            <ThemeSwitcher />
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3 sm:mb-8">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
@@ -245,13 +240,13 @@ export default function DashboardPage() {
           </Button>
         </div>
 
-        <div className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 sm:mb-5 sm:py-2.5">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-border bg-card px-2 py-2 sm:mb-5 sm:py-2.5">
           <Search className="h-3 w-3 shrink-0 text-muted-foreground sm:h-3.5 sm:w-3.5" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects by name…"
-            className="h-auto flex-1 border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
+            className="h-auto flex-1 border-0 bg-transparent px-2 py-1 text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
           />
           {query && (
             <Button
@@ -448,7 +443,7 @@ export default function DashboardPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
+      <Footer />
     </main>
   );
 }
