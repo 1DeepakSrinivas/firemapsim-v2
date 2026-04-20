@@ -1,0 +1,47 @@
+---
+title: FAQ
+description: Common how-to and behavior questions for FireMapSim-v2.
+---
+
+## How do I start a new scenario quickly?
+
+Create a new project from `Dashboard`, set location, add one ignition, then click `Start Simulation`.
+
+## Can I use docs without signing in?
+
+Yes. `/docs` is public.
+
+## Why is `Start Simulation` disabled?
+
+Usually one of these is missing:
+
+- project location,
+- at least one ignition segment,
+- valid run configuration.
+
+See [Troubleshooting](/docs/troubleshooting).
+
+## Why can I not change project location anymore?
+
+After simulation results exist, location is locked to keep run context consistent. Use project reset to start fresh.
+
+## What weather inputs are supported?
+
+- Manual overrides: wind speed, wind direction, temperature, humidity.
+- Lookup: city, address, or US ZIP.
+
+## Do I have to use chat guidance?
+
+No. You can choose manual setup or guided chat flow in the workspace banner.
+
+## Can I edit ignition details after adding them?
+
+Yes. You can adjust coordinates, mode/type, speed, and team assignment from ignition controls.
+
+## What does replay do?
+
+Replay animates run output over time so you can inspect progression and compare scenario outcomes.
+
+## Where are technical architecture docs?
+
+Engineering docs remain in the repository root `docs/` directory and are separate from this end-user docs site.

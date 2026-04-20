@@ -1,0 +1,72 @@
+---
+title: Getting Started
+description: Step-by-step guide for first simulation run in FireMapSim-v2.
+---
+
+This guide gets you from sign-in to a complete first simulation run.
+
+## 1. Sign in
+
+1. Open the app root.
+2. Click `Get started`.
+3. Complete authentication.
+4. You should land on `Dashboard`.
+
+## 2. Create a project
+
+1. In `Dashboard`, click `New project`.
+2. The app opens a project workspace route of the form `/{userSlug}/{projectId}`.
+3. Confirm the left sidebar shows your project title and workspace controls.
+
+## 3. Set project location
+
+1. In the sidebar, open `Project Location`.
+2. Click `Set Project Location`.
+3. Place a valid location/boundary in the map flow.
+4. Confirm the project area is now set.
+
+Notes:
+
+- You cannot finalize simulation actions without a project location.
+- If simulation results already exist, location is locked until reset.
+
+## 4. Configure base inputs
+
+1. In `Cell Grid`, set cell resolution and grid side length.
+2. In `Weather & Layers`, either:
+   - manually edit wind/temperature/humidity values, or
+   - run weather lookup by city/address/US ZIP.
+
+## 5. Add ignitions
+
+1. In `Ignition Parameters`, add at least one ignition.
+2. Use point or line ignition based on your scenario.
+3. Verify each ignition is inside the project boundary.
+
+## 6. Optional fuel breaks
+
+1. Open `Fuel Breaks`.
+2. Add line segments for suppression/fuel break effects.
+3. Confirm they are positioned as intended.
+
+## 7. Set run duration and start simulation
+
+1. Open `Run Configuration`.
+2. Choose simulation timesteps.
+3. Click `Start Simulation`.
+
+If preconditions are missing (for example, no ignitions), run is blocked.
+
+## 8. Review results
+
+1. Wait for run completion.
+2. Inspect map overlays and replay controls.
+3. Use terrain layers and stats panels to interpret output.
+
+## 9. Iterate safely
+
+- Adjust weather, ignitions, or fuel breaks and rerun.
+- Rename projects as needed from sidebar/dashboard.
+- Use reset only when you intentionally want a clean slate.
+
+Next: [Workflows](/docs/workflows)
