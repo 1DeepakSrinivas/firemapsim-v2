@@ -53,5 +53,11 @@ describe("/api/agent Mastra initialization", () => {
     expect(response.status).toBe(200);
     expect(getMastra).toHaveBeenCalledTimes(1);
     expect(handleChatStream).toHaveBeenCalledTimes(1);
+    const allCalls = handleChatStream.mock.calls as unknown as unknown[][];
+    const firstCall = allCalls[0];
+    const chatArgs = firstCall?.[0] as
+      | { defaultOptions?: { memory?: unknown } }
+      | undefined;
+    expect(chatArgs?.defaultOptions?.memory).toBeUndefined();
   });
 });
