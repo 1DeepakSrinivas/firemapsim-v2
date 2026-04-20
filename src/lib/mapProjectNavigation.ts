@@ -1,9 +1,10 @@
 import type { IgnitionPlan } from "@/types/ignitionPlan";
+import { hasNonZeroCenter, isValidGeodeticCenter } from "@/lib/geoCoords";
 
 /** True when the plan has a real map position worth navigating to (not the default empty project). */
 export function hasSavedProjectMapPosition(plan: IgnitionPlan): boolean {
   if (plan.boundaryGeoJSON) return true;
-  return plan.proj_center_lat !== 0 || plan.proj_center_lng !== 0;
+  return hasNonZeroCenter(plan.proj_center_lat, plan.proj_center_lng);
 }
 
 /**
@@ -33,10 +34,12 @@ export async function navigateMapToProject(
     }
   }
 
-  map.flyTo([plan.proj_center_lat, plan.proj_center_lng], 13, {
-    animate: true,
-    duration: 1.2,
-  });
+  if (isValidGeodeticCenter(plan.proj_center_lat, plan.proj_center_lng)) {
+    map.flyTo([plan.proj_center_lat, plan.proj_center_lng], 13, {
+      animate: true,
+      duration: 1.2,
+    });
+  }
 }
 
 /** Stable key for map position only (ignores wind/weather fields on the plan). */

@@ -8,11 +8,20 @@ import {
   loadProjectChatMessages,
   replaceProjectChatMessages,
 } from "@/lib/projectChatStore";
+import {
+  readLatestSimulationSummary,
+  toLegacyOverlaySummary,
+} from "@/lib/latestSimulationStore";
 import { sanitizeLastSimulationForDb } from "@/lib/projectPersistence";
 import { supabase } from "@/lib/supabase";
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
+import type { LatestSimulationSummary } from "@/types/latestSimulation";
 import type { LastSimulationSnapshot } from "@/types/lastSimulation";
-import { defaultIgnitionPlan, type IgnitionPlan } from "@/types/ignitionPlan";
+import {
+  defaultIgnitionPlan,
+  normalizeIgnitionPlan,
+  type IgnitionPlan,
+} from "@/types/ignitionPlan";
 
 export const runtime = "nodejs";
 
@@ -205,7 +214,8 @@ async function updateProjectCompat(
       return { data: (data as ProjectUpdateResultRow | null) ?? null, error: null };
     }
 
-    if (error.code !== "42703") {
+    const isMissingColumn = error.code === "42703" || error.code === "PGRST204";
+    if (!isMissingColumn) {
       return { data: null, error: toCompatError(error, "Failed to update project.") };
     }
 
@@ -256,10 +266,8 @@ function defaultWeather() {
 }
 
 function coercePlan(raw: unknown): IgnitionPlan {
-  if (raw && typeof raw === "object") {
-    return raw as IgnitionPlan;
-  }
-  return defaultIgnitionPlan();
+  if (!raw || typeof raw !== "object") return defaultIgnitionPlan();
+  return normalizeIgnitionPlan(raw);
 }
 
 type RouteContext = { params: Promise<{ projectId: string }> };
@@ -320,6 +328,27 @@ export async function GET(_request: Request, context: RouteContext) {
       };
     }
   }
+  let latestSimulationSummary: LatestSimulationSummary | null = null;
+  try {
+    latestSimulationSummary = await readLatestSimulationSummary(projectId);
+  } catch {
+    latestSimulationSummary = null;
+  }
+  if (!latestSimulationSummary && lastSimulation) {
+    const plan = coercePlan(project.plan);
+    latestSimulationSummary = toLegacyOverlaySummary(
+      lastSimulation.overlay,
+      lastSimulation.completedAt,
+      lastSimulation.weatherSource,
+      {
+        cellResolution: plan.cellResolution,
+        cellSpaceDimension: plan.cellSpaceDimension,
+        cellSpaceDimensionLat: plan.cellSpaceDimensionLat,
+        projCenterLat: plan.proj_center_lat,
+        projCenterLng: plan.proj_center_lng,
+      },
+    );
+  }
 
   const rawChat = hasAgentChat
     ? (project as { agent_chat_messages?: unknown }).agent_chat_messages
@@ -359,6 +388,7 @@ export async function GET(_request: Request, context: RouteContext) {
       (project.workflow_mode === "manual" || project.workflow_mode === "chat")
         ? project.workflow_mode
         : null,
+    latestSimulationSummary,
     lastSimulation,
     agentChatMessages,
     agentChatIntroDone,
@@ -414,7 +444,7 @@ export async function PUT(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const plan = body.plan as IgnitionPlan;
+  const plan = normalizeIgnitionPlan(body.plan);
 
   const updatePayload: Record<string, unknown> = {
     title: body.title,

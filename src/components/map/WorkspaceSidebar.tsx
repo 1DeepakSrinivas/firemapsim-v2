@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Check,
@@ -63,8 +63,7 @@ import type {
 import {
   IGNITION_TEAM_PICKER_COUNT,
   ignitionModeForGeometry,
-  ignitionModesForSegmentGeometry,
-  type IgnitionMode,
+  ignitionModeOptionsForCurrent,
 } from "@/types/ignitionPlan";
 import type { MapInteractionMode } from "./MapInteractionLayer";
 import { type ActionId } from "./ActionModal";
@@ -282,19 +281,13 @@ function SidebarIgnitionModeSelect({
   onSegmentEdit: (edit: SegmentEdit) => void;
 }) {
   const value = ignitionModeForGeometry(mode, isPoint);
-  const options = ignitionModesForSegmentGeometry(isPoint);
-
-  useEffect(() => {
-    if (value !== mode) {
-      onSegmentEdit({ teamIndex, segmentIndex: segIndex, mode: value });
-    }
-  }, [teamIndex, segIndex, mode, value, onSegmentEdit]);
+  const options = ignitionModeOptionsForCurrent(value, isPoint);
 
   return (
     <Select
       value={value}
       onValueChange={(nextValue) =>
-        onSegmentEdit({ teamIndex, segmentIndex: segIndex, mode: nextValue as IgnitionMode })
+        onSegmentEdit({ teamIndex, segmentIndex: segIndex, mode: nextValue })
       }
     >
       <SelectTrigger className="h-auto w-full border-border/60 px-2 py-1 text-xs">
@@ -898,6 +891,7 @@ export function WorkspaceSidebar({
   onRenameProject,
 }: WorkspaceSidebarProps) {
   const { user } = useUser();
+  const { openUserProfile } = useClerk();
   const userName = user?.fullName ?? user?.firstName ?? user?.username ?? "FireMapSim";
   const userEmail = user?.primaryEmailAddress?.emailAddress ?? "Manage your account";
   const [editingProjectTitle, setEditingProjectTitle] = useState(false);
@@ -1110,20 +1104,29 @@ export function WorkspaceSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <div className="flex items-center gap-2 rounded-md px-2 py-1.5 group-data-[collapsible=icon]:justify-center">
-              <UserButton
-                appearance={{
-                  elements: { avatarBox: "h-7 w-7" },
-                }}
-              />
-              <div className="grid min-w-0 flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                <span className="truncate text-sm font-medium">{userName}</span>
-                <span className="truncate text-xs text-sidebar-foreground/60">{userEmail}</span>
-              </div>
-            </div>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <div className="flex items-center justify-between rounded-md px-2 py-1.5 group-data-[collapsible=icon]:justify-center">
-              <span className="text-xs text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">Theme</span>
+              <button
+                type="button"
+                onClick={() => openUserProfile()}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-sidebar-border/70 px-2 py-1.5 text-left hover:bg-sidebar-accent/40 focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:outline-none group-data-[collapsible=icon]:hidden"
+                title="Open account settings"
+              >
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sidebar-accent text-xs font-semibold text-sidebar-accent-foreground">
+                  {user?.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={user.imageUrl}
+                      alt={userName}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    (userName[0] ?? "U").toUpperCase()
+                  )}
+                </span>
+                <span className="grid min-w-0 flex-1 leading-tight">
+                  <span className="truncate text-sm font-medium">{userName}</span>
+                  <span className="truncate text-xs text-sidebar-foreground/60">{userEmail}</span>
+                </span>
+              </button>
               <ThemeSwitcher />
             </div>
           </SidebarMenuItem>

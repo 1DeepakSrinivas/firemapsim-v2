@@ -5,12 +5,6 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
 bun dev
 ```
 
@@ -19,6 +13,16 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Testing Convention
+
+- Canonical test location is the root `__tests__/` tree, mirrored by source area (`__tests__/app`, `__tests__/lib`, `__tests__/mastra`, `__tests__/types`).
+- New co-located tests in `src/**/*.test.ts(x)` are deprecated and blocked by `bun run test:guard:placement`.
+- Run tests with:
+
+```bash
+bun run test
+```
 
 ## Learn More
 
