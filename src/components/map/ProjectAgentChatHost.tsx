@@ -14,6 +14,7 @@ import {
 
 import type { IgnitionPlan } from "@/types/ignitionPlan";
 import type { ProjectWorkflowMode } from "@/stores/projectWorkspaceStore";
+import { createAgentRuntimeContextBodyGetter } from "@/lib/agentRuntimeContext";
 
 const DEFAULT_INTRO_USER_MESSAGE =
   "Hello, I'm ready to set up a simulation. Please guide me.";
@@ -61,16 +62,33 @@ export function ProjectAgentChatHost({
   onIntroClaimed,
   children,
 }: ProjectAgentChatHostProps) {
+  const modeRef = useRef<ProjectWorkflowMode>(mode);
+  const planSnapshotRef = useRef(planSnapshot);
+  modeRef.current = mode;
+  planSnapshotRef.current = planSnapshot;
+
+  const transportBody = useMemo(
+    () =>
+      createAgentRuntimeContextBodyGetter({
+        modeRef,
+        planSnapshotRef,
+      }),
+    [],
+  );
+
   const { messages, sendMessage, status } = useChat({
     id: `project-${projectId}`,
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: "/api/agent",
-      body: () => ({
-        threadId: `project-${projectId}`,
-        mode,
-        planSnapshot,
-      }),
+      body: () => {
+        const runtime = transportBody();
+        return {
+          threadId: `project-${projectId}`,
+          mode: runtime.mode,
+          planSnapshot: runtime.planSnapshot,
+        };
+      },
     }),
   });
 

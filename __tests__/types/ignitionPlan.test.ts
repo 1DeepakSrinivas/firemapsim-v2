@@ -302,4 +302,56 @@ describe("mergeActionIntoPlan line ignition defaults", () => {
     expect(seg?.mode).toBe("continuous");
     expect(seg?.distance).toBeNull();
   });
+
+  test("clamps line ignition coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "line-ignition",
+      start_x: -5,
+      start_y: 30,
+      end_x: 200,
+      end_y: 999,
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg).toMatchObject({
+      start_x: 0,
+      start_y: 30,
+      end_x: 199,
+      end_y: 199,
+    });
+  });
+});
+
+describe("mergeActionIntoPlan coordinate clamping", () => {
+  test("clamps point ignition coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "point-ignition",
+      points: [{ x: 200, y: -1 }],
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg).toMatchObject({
+      start_x: 199,
+      start_y: 0,
+      end_x: 199,
+      end_y: 0,
+    });
+  });
+
+  test("clamps fuel break coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "fuel-break",
+      x1: -9,
+      y1: 210,
+      x2: 240,
+      y2: -5,
+    });
+
+    expect(next.sup_infos[0]).toEqual({
+      x1: 0,
+      y1: 199,
+      x2: 199,
+      y2: 0,
+    });
+  });
 });
