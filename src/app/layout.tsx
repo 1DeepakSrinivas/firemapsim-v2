@@ -22,6 +22,9 @@ export const metadata: Metadata = {
   },
   description:
     "A map-first wildfire simulation research workspace with agent-assisted scenario setup and dashboard-based project management.",
+  icons: {
+    icon: "/icons/favicon.svg",
+  },
 };
 
 export default function RootLayout({

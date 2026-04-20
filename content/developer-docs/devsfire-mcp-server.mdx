@@ -1,0 +1,54 @@
+---
+title: DEVS-FIRE MCP Server
+description: Documentation MCP server reference for DEVS-FIRE API usage and endpoint discovery.
+---
+
+This project uses a DEVS-FIRE documentation MCP server to help agents and developers work with the DEVS-FIRE API reliably.
+
+## Repository
+
+- GitHub: [DEVS-FIRE-MCP](https://github.com/1DeepakSrinivas/DEVS-FIRE-MCP)
+
+## What this MCP server provides
+
+The DEVS-FIRE MCP server is documentation-first. It does not execute live fire simulations directly from the MCP call layer. Instead, it provides:
+
+- endpoint discovery and search,
+- per-endpoint parameter docs,
+- canonical URL/path guidance,
+- recommended call sequences for simulation sessions.
+
+In this workspace, these MCP tools are available:
+
+- `devsfire_agent_handbook`
+- `devsfire_list_endpoints`
+- `devsfire_search_endpoints`
+- `devsfire_get_endpoint_documentation`
+
+## Canonical DEVS-FIRE URL rules
+
+Use these URL conventions for API calls:
+
+- Base URL: `https://firesim.cs.gsu.edu`
+- Path shape: `/api/<EndpointName>/`
+- Include a trailing slash.
+- Do not use `:8084` variants.
+
+Example canonical endpoint:
+
+- `https://firesim.cs.gsu.edu/api/connectToServer/`
+
+## Typical simulation session flow
+
+1. `connectToServer` to obtain `userToken`.
+2. Pass `userToken` on all subsequent calls.
+3. Configure location, wind, and grid.
+4. Set ignition (`setPointIgnition` or `setDynamicIgnition`).
+5. Run/continue simulation.
+6. Read outputs (for example perimeter or burned-area endpoints).
+
+## How to use this page in development
+
+- Start here when integrating or debugging DEVS-FIRE API usage.
+- Use endpoint docs tools to confirm request params before changing route handlers.
+- Prefer canonical URL forms documented above to avoid silent failures.

@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Crosshair,
   Database,
-  Flame,
   Layers,
   Loader2,
   MapPin,
@@ -23,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 
+import { LogoMarkIcon } from "@/components/brand/LogoMarkIcon";
 import {
   ASPECT_LEGEND_CAPTION,
   FUEL_LEGEND_STOPS,
@@ -1637,7 +1637,7 @@ function IgnitionParametersPanel({
         <AccordionItem value="ignition" className="border-none">
           <AccordionTrigger className="w-full px-2.5 py-1.5 sm:px-3 sm:py-2 hover:no-underline hover:bg-white/5 data-[state=open]:border-b data-[state=open]:border-white/6">
             <div className="flex items-center gap-2 flex-1 text-left">
-              <Flame className="h-3 w-3 text-orange-400/70 sm:h-3.5 sm:w-3.5" />
+              <LogoMarkIcon className="h-5 w-5 sm:h-3.5 sm:w-3.5" alt="Ignition parameters" />
               <span className="text-[10px] font-semibold tracking-wide text-white/80 sm:text-[11px]">
                 Ignition Parameters
               </span>

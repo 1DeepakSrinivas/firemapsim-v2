@@ -1,0 +1,44 @@
+---
+title: Weather & Terrain Layers
+description: Weather lookup/overrides and terrain data overlays.
+---
+
+## Weather inputs
+
+### Manual overrides
+
+Editable values:
+
+- wind speed,
+- wind direction,
+- temperature,
+- humidity.
+
+### Weather lookup
+
+Lookup supports:
+
+- city,
+- street address,
+- US ZIP.
+
+On success, current conditions are loaded and applied to scenario state.
+
+## Terrain overlays
+
+Available layers:
+
+- fuel,
+- slope,
+- aspect.
+
+You can:
+
+- load layer data,
+- switch active layer,
+- toggle per-cell info cursor.
+
+## Troubleshooting pointers
+
+- weather lookup errors: verify query format and US scope,
+- terrain load errors: retry after confirming project location and run context.
