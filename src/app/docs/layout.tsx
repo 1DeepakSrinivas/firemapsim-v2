@@ -142,6 +142,7 @@ export default async function DocsLayout({
       `}</style>
       <div className="fms-docs-shell">
         <Layout
+          banner={null}
           docsRepositoryBase="https://github.com/1DeepakSrinivas/firemapsim-v2/tree/main/content"
           editLink={null}
           feedback={{ content: null }}
