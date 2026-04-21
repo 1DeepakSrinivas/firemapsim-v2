@@ -60,3 +60,6 @@ bun-*.log
 # Backend
 .mastra/
 .mastra-project.json
+
+# Report
+/report/*
