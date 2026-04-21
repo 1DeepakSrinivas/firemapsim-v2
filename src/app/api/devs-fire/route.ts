@@ -8,7 +8,7 @@ import { ensureAuthedUser, requireSessionToken } from "@/lib/devsfire/routeHandl
 import { setSessionCookie } from "@/lib/devsfire/session";
 
 export const runtime = "nodejs";
-export const maxDuration = 360;
+export const maxDuration = 300;
 
 const queryValueSchema = z.union([
   z.string(),

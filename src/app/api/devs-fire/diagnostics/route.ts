@@ -6,7 +6,7 @@ import { errorEnvelope, successEnvelope } from "@/lib/devsfire/envelope";
 import { DevsFireError } from "@/lib/devsfire/errors";
 
 export const runtime = "nodejs";
-export const maxDuration = 360;
+export const maxDuration = 300;
 
 function getBearerToken(headerValue: string | null): string | null {
   if (!headerValue) {
