@@ -331,7 +331,34 @@ export function normalizeIgnitionPlan(raw: unknown): IgnitionPlan {
       ? { boundaryGeoJSON: raw.boundaryGeoJSON as BoundaryGeoJSON }
       : {}),
   };
-  return withSquareGridDimensions(normalizedPlan);
+  const squaredPlan = withSquareGridDimensions(normalizedPlan);
+  const clampedTeamInfos = squaredPlan.team_infos.map((team) => {
+    const details = team.details.map((seg) => ({
+      ...seg,
+      start_x: clampGridCoordinate(seg.start_x, squaredPlan.cellSpaceDimension),
+      start_y: clampGridCoordinate(seg.start_y, squaredPlan.cellSpaceDimensionLat),
+      end_x: clampGridCoordinate(seg.end_x, squaredPlan.cellSpaceDimension),
+      end_y: clampGridCoordinate(seg.end_y, squaredPlan.cellSpaceDimensionLat),
+    }));
+    return {
+      ...team,
+      details,
+      info_num: details.length,
+    };
+  });
+  const clampedSupInfos = squaredPlan.sup_infos.map((sup) => ({
+    ...sup,
+    x1: clampGridCoordinate(sup.x1, squaredPlan.cellSpaceDimension),
+    y1: clampGridCoordinate(sup.y1, squaredPlan.cellSpaceDimensionLat),
+    x2: clampGridCoordinate(sup.x2, squaredPlan.cellSpaceDimension),
+    y2: clampGridCoordinate(sup.y2, squaredPlan.cellSpaceDimensionLat),
+  }));
+  return {
+    ...squaredPlan,
+    team_infos: clampedTeamInfos,
+    sup_infos: clampedSupInfos,
+    sup_num: clampedSupInfos.length,
+  };
 }
 
 function segmentPoint(x: number, y: number, speed: number, mode: string): SegmentDetail {

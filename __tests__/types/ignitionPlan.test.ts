@@ -221,6 +221,51 @@ describe("normalizeIgnitionPlan", () => {
     expect(normalized.cellSpaceDimension).toBe(240);
     expect(normalized.cellSpaceDimensionLat).toBe(240);
   });
+
+  test("clamps normalized ignition/suppression coordinates to grid bounds", () => {
+    const normalized = normalizeIgnitionPlan({
+      ...buildApiSamplePlan(),
+      cellSpaceDimension: 200,
+      cellSpaceDimensionLat: 200,
+      team_infos: [
+        {
+          team_name: "team0",
+          details: [
+            {
+              type: "segment",
+              start_x: -12,
+              start_y: 500,
+              end_x: 999,
+              end_y: -4,
+              speed: 0.6,
+              mode: "continuous",
+            },
+          ],
+        },
+      ],
+      sup_infos: [
+        {
+          x1: -7,
+          y1: 255,
+          x2: 700,
+          y2: -8,
+        },
+      ],
+    });
+
+    expect(normalized.team_infos[0]?.details[0]).toMatchObject({
+      start_x: 0,
+      start_y: 199,
+      end_x: 199,
+      end_y: 0,
+    });
+    expect(normalized.sup_infos[0]).toEqual({
+      x1: 0,
+      y1: 199,
+      x2: 199,
+      y2: 0,
+    });
+  });
 });
 
 describe("ignition mode helpers", () => {
