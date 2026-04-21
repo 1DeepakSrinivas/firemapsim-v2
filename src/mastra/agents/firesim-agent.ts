@@ -56,6 +56,13 @@ For update-plan field names, use the plan schema keys exactly:
 - cellResolution, cellSpaceDimension, cellSpaceDimensionLat
 - proj_center_lat, proj_center_lng
 
+For ignition and fuel-break geometry updates:
+- Use grid-cell coordinates only (not lat/lng).
+- For ignition segments, use canonical fields start_x/start_y/end_x/end_y.
+- Keep all geometry coordinates constrained to the active planSnapshot grid:
+  x in [0, cellSpaceDimension-1], y in [0, cellSpaceDimensionLat-1].
+- During ignition/fuel-break steps, do not change location center/boundary fields unless the user explicitly asks to relocate the project.
+
 When user provides an address:
 - Use geo-geocode-address.
 - Show resolved coordinates/place in one sentence.

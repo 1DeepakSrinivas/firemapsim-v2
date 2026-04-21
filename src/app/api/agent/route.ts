@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import z from "zod";
 
 import { getMastra } from "@/mastra";
+import { buildAgentRuntimeContext } from "@/lib/agentRuntimeContext";
 import { upsertLocalUserFromClerk } from "@/lib/user-store";
 
 const requestSchema = z
@@ -70,16 +71,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const mode = body.mode === "manual" || body.mode === "chat" ? body.mode : null;
-    const planSnapshot = body.planSnapshot ?? null;
+    const runtimeContext = buildAgentRuntimeContext({
+      mode: body.mode,
+      planSnapshot: body.planSnapshot ?? null,
+    });
 
     const runtimeContextSystem = [
       "RUNTIME_CONTEXT",
       "Treat the following JSON as the current frontend state for this turn.",
       "Use it to avoid re-asking for already-filled values and to honor mode behavior.",
       JSON.stringify({
-        mode,
-        planSnapshot,
+        mode: runtimeContext.mode,
+        planSnapshot: runtimeContext.planSnapshot,
       }),
     ].join("\n");
 

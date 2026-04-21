@@ -16,7 +16,6 @@ import {
 import { ProjectAgentChatHost } from "@/components/map/ProjectAgentChatHost";
 import FireMap from "@/components/map/FireMap";
 import { type ActionId } from "@/components/map/ActionModal";
-import { MapInteractionHUD } from "@/components/map/MapInteractionHUD";
 import type { MapInteractionMode } from "@/components/map/MapInteractionLayer";
 import { MapOverlayPanels, type MapStyleId } from "@/components/map/MapOverlayPanels";
 import { WorkspaceSidebar } from "@/components/map/WorkspaceSidebar";
@@ -47,6 +46,7 @@ import {
 } from "@/lib/mapProjectNavigation";
 import { ensurePlanBoundary, pointInBoundary } from "@/lib/projectBoundary";
 import { hasNonZeroCenter } from "@/lib/geoCoords";
+import { gridProjectionFromPlan, latLngToGridCell } from "@/lib/gridProjection";
 import {
   applySegmentEdit,
   defaultIgnitionPlan,
@@ -234,10 +234,8 @@ export function ProjectWorkspace({
   const [interactionPalette, setInteractionPalette] = useState<
     "fuel-break" | "location" | "ignition"
   >("ignition");
-  const [interactionHint, setInteractionHint] = useState<string | null>(null);
   const pendingActionRef = useRef<"location" | "fuel-break" | "point-ignition" | "line-ignition" | null>(null);
   const pendingPolygonRef = useRef<import("leaflet").LatLng[]>([]);
-  const interactionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMapPositionNavKeyRef = useRef<string | null>(null);
   const readyBadgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1316,9 +1314,15 @@ export function ProjectWorkspace({
 
   const handlePointIgnitionEdit = useCallback(
     (input: { teamIndex: number; segmentIndex: number; x: number; y: number }) => {
-      const x = Number.isFinite(input.x) ? Math.max(0, Math.round(input.x)) : 0;
-      const y = Number.isFinite(input.y) ? Math.max(0, Math.round(input.y)) : 0;
       setProjectConfig((prev) => {
+        const xMax = Math.max(0, Math.round(prev.cellSpaceDimension) - 1);
+        const yMax = Math.max(0, Math.round(prev.cellSpaceDimensionLat) - 1);
+        const x = Number.isFinite(input.x)
+          ? Math.min(Math.max(0, Math.round(input.x)), xMax)
+          : 0;
+        const y = Number.isFinite(input.y)
+          ? Math.min(Math.max(0, Math.round(input.y)), yMax)
+          : 0;
         const team = prev.team_infos[input.teamIndex];
         if (!team) return prev;
         const seg = team.details[input.segmentIndex];
@@ -1362,7 +1366,6 @@ export function ProjectWorkspace({
     }
     skipSaveAfterLoadRef.current = false;
     setProjectTitle(nextTitle);
-    setInteractionHint(null);
     setProjectConfig(plan);
     setWeatherOverrides({});
     setTerrainState({ ...INITIAL_TERRAIN, show: new Set() });
@@ -1410,28 +1413,16 @@ export function ProjectWorkspace({
   }, [projectId, agentChatSnapshot, stopReplayAnimation, workflowMode, setProjectConfig]);
 
   useEffect(() => {
-    if (!mapInteractionMode) setInteractionHint(null);
-  }, [mapInteractionMode]);
-
-  useEffect(() => {
     if (!mapInteractionMode) {
       setInteractionPalette("ignition");
     }
   }, [mapInteractionMode]);
 
-  useEffect(() => {
-    return () => {
-      if (interactionHintTimerRef.current) clearTimeout(interactionHintTimerRef.current);
-    };
-  }, []);
-
   const pushInteractionHint = useCallback(() => {
-    setInteractionHint("Outside project area — click inside the orange boundary");
-    if (interactionHintTimerRef.current) clearTimeout(interactionHintTimerRef.current);
-    interactionHintTimerRef.current = setTimeout(() => {
-      setInteractionHint(null);
-      interactionHintTimerRef.current = null;
-    }, 4500);
+    toast.error("Outside project area. Click inside the orange boundary.", {
+      id: "outside-project-area",
+      duration: 3000,
+    });
   }, []);
 
   const validateInteractionLatLng = useCallback(
@@ -1469,14 +1460,11 @@ export function ProjectWorkspace({
       setMapInteractionMode(null);
       return;
     }
-    const cellRes = projectConfig.cellResolution;
-    const cx = projectConfig.proj_center_lng;
-    const cy = projectConfig.proj_center_lat;
-    const metersPerDeg = 111320;
-    const dx = (latlng.lng - cx) * metersPerDeg * Math.cos((cy * Math.PI) / 180);
-    const dy = (latlng.lat - cy) * metersPerDeg;
-    const gx = Math.round(dx / cellRes + projectConfig.cellSpaceDimension / 2);
-    const gy = Math.round(dy / cellRes + projectConfig.cellSpaceDimensionLat / 2);
+    const { x: gx, y: gy } = latLngToGridCell(
+      latlng.lat,
+      latlng.lng,
+      gridProjectionFromPlan(projectConfig),
+    );
     const payload: ActionPayload = {
       action: "point-ignition",
       points: [{ x: gx, y: gy, speed: DEFAULT_IGNITION_SPEED_MPS, mode: "point_static" }],
@@ -1495,21 +1483,9 @@ export function ProjectWorkspace({
       setMapInteractionMode(null);
       return;
     }
-    const cellRes = projectConfig.cellResolution;
-    const cx = projectConfig.proj_center_lng;
-    const cy = projectConfig.proj_center_lat;
-    const metersPerDeg = 111320;
-    const cosLat = Math.cos((cy * Math.PI) / 180);
-    const toGrid = (ll: import("leaflet").LatLng) => ({
-      x: Math.round(
-        ((ll.lng - cx) * metersPerDeg * cosLat) / cellRes +
-          projectConfig.cellSpaceDimension / 2,
-      ),
-      y: Math.round(
-        ((ll.lat - cy) * metersPerDeg) / cellRes +
-          projectConfig.cellSpaceDimensionLat / 2,
-      ),
-    });
+    const projection = gridProjectionFromPlan(projectConfig);
+    const toGrid = (ll: import("leaflet").LatLng) =>
+      latLngToGridCell(ll.lat, ll.lng, projection);
     const s = toGrid(start);
     const e = toGrid(end);
     const payload: ActionPayload =
@@ -1567,7 +1543,7 @@ export function ProjectWorkspace({
       );
     }
     setMapInteractionMode(null);
-  }, [applyLocationChange, pushInteractionHint]);
+  }, [applyLocationChange]);
 
   const handlePolyline = useCallback((nodes: import("leaflet").LatLng[]) => {
     const action = pendingActionRef.current;
@@ -1583,19 +1559,9 @@ export function ProjectWorkspace({
         }
       }
     }
-    const cellRes = projectConfig.cellResolution;
-    const cx = projectConfig.proj_center_lng;
-    const cy = projectConfig.proj_center_lat;
-    const metersPerDeg = 111320;
-    const cosLat = Math.cos((cy * Math.PI) / 180);
-    const toGrid = (ll: import("leaflet").LatLng) => {
-      const dx = (ll.lng - cx) * metersPerDeg * cosLat;
-      const dy = (ll.lat - cy) * metersPerDeg;
-      return {
-        x: Math.round(dx / cellRes + projectConfig.cellSpaceDimension / 2),
-        y: Math.round(dy / cellRes + projectConfig.cellSpaceDimensionLat / 2),
-      };
-    };
+    const projection = gridProjectionFromPlan(projectConfig);
+    const toGrid = (ll: import("leaflet").LatLng) =>
+      latLngToGridCell(ll.lat, ll.lng, projection);
     for (let i = 0; i < nodes.length - 1; i++) {
       const s = toGrid(nodes[i]!);
       const e = toGrid(nodes[i + 1]!);
@@ -1656,27 +1622,8 @@ export function ProjectWorkspace({
         action === "location" ? "place-square" : mode;
 
       setMapInteractionMode(resolvedMode);
-
-      if (resolvedMode === "place-square" && action === "location") {
-        const cellSide = projectConfig.cellSpaceDimension;
-        const res = projectConfig.cellResolution;
-        const km = Math.round((cellSide * res) / 1000);
-        setInteractionHint(
-          `Move the cursor to position your ${cellSide}×${cellSide}-cell boundary square (${km} km side), then click to place it.`,
-        );
-      } else if (mode === "polyline" && action === "fuel-break") {
-        setInteractionHint("Click nodes for the fuel-break path, then press Escape to finish.");
-      } else if (mode === "polyline" && action === "line-ignition") {
-        setInteractionHint("Click nodes for the ignition path, then press Escape to finish.");
-      } else if (mode === "line" && action === "line-ignition") {
-        setInteractionHint("Click start point, then end point to place a line ignition.");
-      } else if (mode === "line" && action === "fuel-break") {
-        setInteractionHint("Click start point, then end point to place a fuel-break segment.");
-      } else if (mode === "pin" && action === "point-ignition") {
-        setInteractionHint("Click on the map to place a point ignition source.");
-      }
     },
-    [locationSearchPreview, projectConfig.cellSpaceDimension, projectConfig.cellResolution],
+    [],
   );
 
   if (!hydrated) {
@@ -1904,6 +1851,7 @@ export function ProjectWorkspace({
             onRect={handleRect}
             validateLatLng={validateInteractionLatLng}
             onValidationFail={pushInteractionHint}
+            onInteractionCancel={() => setMapInteractionMode(null)}
             boundaryGeoJSON={projectConfig.boundaryGeoJSON}
             locationSearchPreview={locationSearchPreview}
             terrainData={terrainState.data}
@@ -1955,12 +1903,6 @@ export function ProjectWorkspace({
                 humidity: field === "humidity" ? value : prev.humidity,
               }));
             }}
-          />
-
-          <MapInteractionHUD
-            mode={mapInteractionMode}
-            hint={interactionHint}
-            onCancel={() => setMapInteractionMode(null)}
           />
 
           <div className="pointer-events-none absolute inset-x-0 bottom-2 z-500 flex justify-center px-2 sm:bottom-4 sm:px-4">

@@ -221,6 +221,51 @@ describe("normalizeIgnitionPlan", () => {
     expect(normalized.cellSpaceDimension).toBe(240);
     expect(normalized.cellSpaceDimensionLat).toBe(240);
   });
+
+  test("clamps normalized ignition/suppression coordinates to grid bounds", () => {
+    const normalized = normalizeIgnitionPlan({
+      ...buildApiSamplePlan(),
+      cellSpaceDimension: 200,
+      cellSpaceDimensionLat: 200,
+      team_infos: [
+        {
+          team_name: "team0",
+          details: [
+            {
+              type: "segment",
+              start_x: -12,
+              start_y: 500,
+              end_x: 999,
+              end_y: -4,
+              speed: 0.6,
+              mode: "continuous",
+            },
+          ],
+        },
+      ],
+      sup_infos: [
+        {
+          x1: -7,
+          y1: 255,
+          x2: 700,
+          y2: -8,
+        },
+      ],
+    });
+
+    expect(normalized.team_infos[0]?.details[0]).toMatchObject({
+      start_x: 0,
+      start_y: 199,
+      end_x: 199,
+      end_y: 0,
+    });
+    expect(normalized.sup_infos[0]).toEqual({
+      x1: 0,
+      y1: 199,
+      x2: 199,
+      y2: 0,
+    });
+  });
 });
 
 describe("ignition mode helpers", () => {
@@ -301,5 +346,57 @@ describe("mergeActionIntoPlan line ignition defaults", () => {
     const seg = next.team_infos[0]?.details[0];
     expect(seg?.mode).toBe("continuous");
     expect(seg?.distance).toBeNull();
+  });
+
+  test("clamps line ignition coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "line-ignition",
+      start_x: -5,
+      start_y: 30,
+      end_x: 200,
+      end_y: 999,
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg).toMatchObject({
+      start_x: 0,
+      start_y: 30,
+      end_x: 199,
+      end_y: 199,
+    });
+  });
+});
+
+describe("mergeActionIntoPlan coordinate clamping", () => {
+  test("clamps point ignition coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "point-ignition",
+      points: [{ x: 200, y: -1 }],
+    });
+
+    const seg = next.team_infos[0]?.details[0];
+    expect(seg).toMatchObject({
+      start_x: 199,
+      start_y: 0,
+      end_x: 199,
+      end_y: 0,
+    });
+  });
+
+  test("clamps fuel break coordinates to grid bounds", () => {
+    const next = mergeActionIntoPlan(defaultIgnitionPlan(), {
+      action: "fuel-break",
+      x1: -9,
+      y1: 210,
+      x2: 240,
+      y2: -5,
+    });
+
+    expect(next.sup_infos[0]).toEqual({
+      x1: 0,
+      y1: 199,
+      x2: 199,
+      y2: 0,
+    });
   });
 });

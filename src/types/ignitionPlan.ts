@@ -331,7 +331,34 @@ export function normalizeIgnitionPlan(raw: unknown): IgnitionPlan {
       ? { boundaryGeoJSON: raw.boundaryGeoJSON as BoundaryGeoJSON }
       : {}),
   };
-  return withSquareGridDimensions(normalizedPlan);
+  const squaredPlan = withSquareGridDimensions(normalizedPlan);
+  const clampedTeamInfos = squaredPlan.team_infos.map((team) => {
+    const details = team.details.map((seg) => ({
+      ...seg,
+      start_x: clampGridCoordinate(seg.start_x, squaredPlan.cellSpaceDimension),
+      start_y: clampGridCoordinate(seg.start_y, squaredPlan.cellSpaceDimensionLat),
+      end_x: clampGridCoordinate(seg.end_x, squaredPlan.cellSpaceDimension),
+      end_y: clampGridCoordinate(seg.end_y, squaredPlan.cellSpaceDimensionLat),
+    }));
+    return {
+      ...team,
+      details,
+      info_num: details.length,
+    };
+  });
+  const clampedSupInfos = squaredPlan.sup_infos.map((sup) => ({
+    ...sup,
+    x1: clampGridCoordinate(sup.x1, squaredPlan.cellSpaceDimension),
+    y1: clampGridCoordinate(sup.y1, squaredPlan.cellSpaceDimensionLat),
+    x2: clampGridCoordinate(sup.x2, squaredPlan.cellSpaceDimension),
+    y2: clampGridCoordinate(sup.y2, squaredPlan.cellSpaceDimensionLat),
+  }));
+  return {
+    ...squaredPlan,
+    team_infos: clampedTeamInfos,
+    sup_infos: clampedSupInfos,
+    sup_num: clampedSupInfos.length,
+  };
 }
 
 function segmentPoint(x: number, y: number, speed: number, mode: string): SegmentDetail {
@@ -344,6 +371,20 @@ function segmentPoint(x: number, y: number, speed: number, mode: string): Segmen
     speed,
     mode,
     distance: null,
+  };
+}
+
+function clampGridCoordinate(value: number, dimension: number): number {
+  const max = Math.max(0, Math.round(dimension) - 1);
+  if (!Number.isFinite(value)) return 0;
+  const rounded = Math.round(value);
+  return Math.min(Math.max(rounded, 0), max);
+}
+
+function clampPlanPoint(plan: IgnitionPlan, x: number, y: number): { x: number; y: number } {
+  return {
+    x: clampGridCoordinate(x, plan.cellSpaceDimension),
+    y: clampGridCoordinate(y, plan.cellSpaceDimensionLat),
   };
 }
 
@@ -583,9 +624,10 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
     case "point-ignition": {
       const speed = 3;
       const mode = "point_static";
-      const newDetails = payload.points.map((p) =>
-        segmentPoint(p.x, p.y, p.speed ?? speed, p.mode ?? mode),
-      );
+      const newDetails = payload.points.map((p) => {
+        const clamped = clampPlanPoint(plan, p.x, p.y);
+        return segmentPoint(clamped.x, clamped.y, p.speed ?? speed, p.mode ?? mode);
+      });
       const team0 = plan.team_infos[0] ?? {
         team_name: "team0",
         info_num: 0,
@@ -602,11 +644,13 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
       const speed = payload.speed ?? 3;
       const mode = normalizeLineIgnitionMode(payload.mode ?? "continuous");
       const distance = normalizeLineIgnitionDistance(mode, payload.distance);
+      const start = clampPlanPoint(plan, payload.start_x, payload.start_y);
+      const end = clampPlanPoint(plan, payload.end_x, payload.end_y);
       const seg = segmentLine(
-        payload.start_x,
-        payload.start_y,
-        payload.end_x,
-        payload.end_y,
+        start.x,
+        start.y,
+        end.x,
+        end.y,
         speed,
         mode,
         distance,
@@ -624,34 +668,36 @@ export function mergeActionIntoPlan(plan: IgnitionPlan, payload: ActionPayload):
       return withSquareGridDimensions({ ...plan, team_infos: nextTeams });
     }
     case "fuel-break": {
+      const p1 = clampPlanPoint(plan, payload.x1, payload.y1);
+      const p2 = clampPlanPoint(plan, payload.x2, payload.y2);
       const pieces: SupInfo[] = payload.splitIntoRectangleEdges
         ? [
             {
-              x1: Math.min(payload.x1, payload.x2),
-              y1: Math.min(payload.y1, payload.y2),
-              x2: Math.max(payload.x1, payload.x2),
-              y2: Math.min(payload.y1, payload.y2),
+              x1: Math.min(p1.x, p2.x),
+              y1: Math.min(p1.y, p2.y),
+              x2: Math.max(p1.x, p2.x),
+              y2: Math.min(p1.y, p2.y),
             },
             {
-              x1: Math.min(payload.x1, payload.x2),
-              y1: Math.max(payload.y1, payload.y2),
-              x2: Math.max(payload.x1, payload.x2),
-              y2: Math.max(payload.y1, payload.y2),
+              x1: Math.min(p1.x, p2.x),
+              y1: Math.max(p1.y, p2.y),
+              x2: Math.max(p1.x, p2.x),
+              y2: Math.max(p1.y, p2.y),
             },
             {
-              x1: Math.min(payload.x1, payload.x2),
-              y1: Math.min(payload.y1, payload.y2),
-              x2: Math.min(payload.x1, payload.x2),
-              y2: Math.max(payload.y1, payload.y2),
+              x1: Math.min(p1.x, p2.x),
+              y1: Math.min(p1.y, p2.y),
+              x2: Math.min(p1.x, p2.x),
+              y2: Math.max(p1.y, p2.y),
             },
             {
-              x1: Math.max(payload.x1, payload.x2),
-              y1: Math.min(payload.y1, payload.y2),
-              x2: Math.max(payload.x1, payload.x2),
-              y2: Math.max(payload.y1, payload.y2),
+              x1: Math.max(p1.x, p2.x),
+              y1: Math.min(p1.y, p2.y),
+              x2: Math.max(p1.x, p2.x),
+              y2: Math.max(p1.y, p2.y),
             },
           ]
-        : [{ x1: payload.x1, y1: payload.y1, x2: payload.x2, y2: payload.y2 }];
+        : [{ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y }];
       const sup_infos = [...plan.sup_infos, ...pieces];
       return withSquareGridDimensions({
         ...plan,
