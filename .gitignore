@@ -63,3 +63,6 @@ bun-*.log
 
 # Report
 /report/*
+
+# Supabase migrations are intentionally local-only
+/supabase/migrations/
