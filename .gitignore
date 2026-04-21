@@ -66,3 +66,4 @@ bun-*.log
 
 # Supabase migrations are intentionally local-only
 /supabase/migrations/
+scripts/db/*
