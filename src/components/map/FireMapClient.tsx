@@ -75,6 +75,7 @@ export type FireMapClientProps = {
   onPolyline?: MapInteractionLayerProps["onPolyline"];
   onPolygon?: MapInteractionLayerProps["onPolygon"];
   onRect?: MapInteractionLayerProps["onRect"];
+  onInteractionCancel?: MapInteractionLayerProps["onCancel"];
   boundaryGeoJSON?: BoundaryGeoJSON;
   /** Geocoded place preview (green); cleared when the project boundary is committed */
   locationSearchPreview?: {
@@ -516,6 +517,7 @@ export default function FireMapClient({
   onPolyline,
   onPolygon,
   onRect,
+  onInteractionCancel,
   boundaryGeoJSON,
   locationSearchPreview = null,
   terrainData,
@@ -621,6 +623,7 @@ export default function FireMapClient({
           onPolyline={onPolyline}
           onPolygon={onPolygon}
           onRect={onRect}
+          onCancel={onInteractionCancel}
           validateLatLng={validateLatLng}
           onValidationFail={onValidationFail}
           squareWidthM={squareWidthM}

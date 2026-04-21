@@ -30,6 +30,7 @@ export type FireMapProps = {
   onPolyline?: MapInteractionLayerProps["onPolyline"];
   onPolygon?: MapInteractionLayerProps["onPolygon"];
   onRect?: MapInteractionLayerProps["onRect"];
+  onInteractionCancel?: MapInteractionLayerProps["onCancel"];
   boundaryGeoJSON?: import("@/types/ignitionPlan").BoundaryGeoJSON;
   locationSearchPreview?: {
     lat: number;
@@ -64,6 +65,7 @@ export default function FireMap({
   onPolyline,
   onPolygon,
   onRect,
+  onInteractionCancel,
   boundaryGeoJSON,
   locationSearchPreview,
   terrainData,
@@ -96,6 +98,7 @@ export default function FireMap({
       onPolyline={onPolyline}
       onPolygon={onPolygon}
       onRect={onRect}
+      onInteractionCancel={onInteractionCancel}
       boundaryGeoJSON={boundaryGeoJSON}
       locationSearchPreview={locationSearchPreview}
       terrainData={terrainData}

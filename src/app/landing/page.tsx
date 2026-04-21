@@ -55,7 +55,6 @@ const techStackGroups: { title: string; description: string; items: TechStackIco
       { src: "/icons/typescript.svg", label: "TypeScript" },
       { src: "/icons/bun.svg", label: "Bun" },
       { src: "/icons/react.svg", label: "React" },
-      { src: "/icons/next.svg", label: "Next" },
       { src: "/icons/nextjs.svg", label: "Next.js" },
       { src: "/icons/nextra.svg", label: "Nextra" },
       { src: "/icons/tailwind.svg", label: "Tailwind CSS" },

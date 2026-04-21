@@ -1,8 +1,9 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import z from "zod";
 
 import {
+  classifySimulationError,
   runSimulationWithDynamicWeather,
 } from "@/lib/api/devsFireBackend";
 import {
@@ -228,6 +229,18 @@ export async function POST(request: NextRequest) {
             message: error instanceof Error ? error.message : "Dynamic weather fetch failed",
             status: 502,
           }),
+        );
+      }
+      const classified = classifySimulationError(error);
+      if (classified.code !== "simulation_failed") {
+        return NextResponse.json(
+          {
+            code: classified.code,
+            error: classified.message,
+            details: classified.details,
+            hint: classified.hint,
+          },
+          { status: classified.status },
         );
       }
       throw error;

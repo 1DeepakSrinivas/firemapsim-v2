@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { NextRequest } from "next/server";
+import { CoordinateOutOfBoundsError } from "@/lib/devsFireCoordinateValidation";
 
 const projectId = "2449abd4-262a-4d74-85fd-a733e5ff2e28";
 
@@ -14,7 +15,9 @@ const currentUser = mock(async () => ({
 
 const upsertLocalUserFromClerk = mock(async () => undefined);
 
-const runSimulationWithDynamicWeather = mock(async () => ({
+mock.module("server-only", () => ({}));
+
+const successfulSimulationResult = {
   weatherFetched: {
     windSpeed: 12,
     windDirection: 180,
@@ -55,7 +58,33 @@ const runSimulationWithDynamicWeather = mock(async () => ({
     },
     userToken: "token-123",
   },
-}));
+};
+
+let simulationFailure: Error | null = null;
+const runSimulationWithDynamicWeather = mock(async () => {
+  if (simulationFailure) {
+    throw simulationFailure;
+  }
+  return successfulSimulationResult;
+});
+
+const classifySimulationError = (error: unknown) => {
+  if (error instanceof CoordinateOutOfBoundsError) {
+    return {
+      code: "coordinate_out_of_bounds",
+      message: error.message,
+      status: 400,
+      details: error.message,
+      hint: "Adjust ignition/suppression points so all coordinates stay inside the selected boundary.",
+    };
+  }
+  return {
+    code: "simulation_failed",
+    message: error instanceof Error ? error.message : "Unknown error",
+    status: 500,
+    details: error instanceof Error ? error.message : "Unknown error",
+  };
+};
 
 let updateCalls = 0;
 let updateError: { code?: string; message: string } | null = {
@@ -98,6 +127,7 @@ mock.module("@/lib/user-store", () => ({
 
 mock.module("@/lib/api/devsFireBackend", () => ({
   runSimulationWithDynamicWeather,
+  classifySimulationError,
 }));
 
 mock.module("@/lib/supabase", () => ({
@@ -137,6 +167,7 @@ function validBody() {
 
 describe("simulation persistence resilience", () => {
   test("run route succeeds even when latest simulation persistence fails", async () => {
+    simulationFailure = null;
     updateCalls = 0;
     updateError = { code: "XX000", message: "write failed" };
     const route = await import("@/app/api/simulation/run/route");
@@ -157,6 +188,7 @@ describe("simulation persistence resilience", () => {
   });
 
   test("delegate run route succeeds even when latest simulation persistence fails", async () => {
+    simulationFailure = null;
     updateCalls = 0;
     updateError = { code: "XX000", message: "write failed" };
     const route = await import("@/app/api/simulation/delegate-run/route");
@@ -180,5 +212,61 @@ describe("simulation persistence resilience", () => {
     expect(json.ok).toBe(true);
     expect(json.data.ok).toBe(true);
     expect(updateCalls).toBe(1);
+  });
+
+  test("run route returns structured 400 for coordinate bounds failures", async () => {
+    simulationFailure = new CoordinateOutOfBoundsError(
+      "Suppression line 1",
+      "y2 (col)",
+      200,
+      200,
+    );
+    const route = await import("@/app/api/simulation/run/route");
+
+    const request = new Request("http://localhost:3000/api/simulation/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validBody()),
+    }) as unknown as NextRequest;
+
+    const response = await route.POST(request);
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.code).toBe("coordinate_out_of_bounds");
+    expect(json.error).toContain("out of bounds [0, 200)");
+    expect(json.details).toContain("Suppression line 1");
+    expect(json.hint).toContain("Adjust ignition/suppression points");
+  });
+
+  test("delegate run route returns structured 400 for coordinate bounds failures", async () => {
+    simulationFailure = new CoordinateOutOfBoundsError(
+      "Suppression line 1",
+      "y2 (col)",
+      200,
+      200,
+    );
+    const route = await import("@/app/api/simulation/delegate-run/route");
+
+    const request = new Request(
+      "http://localhost:3000/api/simulation/delegate-run",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...validBody(),
+          reason: "agent-triggered",
+        }),
+      },
+    ) as unknown as NextRequest;
+
+    const response = await route.POST(request);
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.code).toBe("coordinate_out_of_bounds");
+    expect(json.error).toContain("out of bounds [0, 200)");
+    expect(json.details).toContain("Suppression line 1");
+    expect(json.hint).toContain("Adjust ignition/suppression points");
   });
 });

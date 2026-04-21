@@ -13,6 +13,42 @@ export type GridProjectionParams = {
 
 const METERS_PER_DEG = 111320;
 
+function normalizeGridDimension(dimension: number): number {
+  if (!Number.isFinite(dimension)) return 1;
+  return Math.max(1, Math.round(dimension));
+}
+
+/**
+ * Clamp a grid index into `[0, dimension - 1]`.
+ */
+export function clampGridIndex(value: number, dimension: number): number {
+  const max = normalizeGridDimension(dimension) - 1;
+  if (!Number.isFinite(value)) return 0;
+  const rounded = Math.round(value);
+  return Math.min(Math.max(rounded, 0), max);
+}
+
+/**
+ * lat/lng → clamped integer grid index.
+ */
+export function latLngToGridCell(
+  lat: number,
+  lng: number,
+  p: GridProjectionParams,
+): { x: number; y: number } {
+  const cosLat = Math.cos((p.projCenterLat * Math.PI) / 180);
+  const xRaw =
+    ((lng - p.projCenterLng) * METERS_PER_DEG * cosLat) / p.cellResolution +
+    p.cellSpaceDimension / 2;
+  const yRaw =
+    ((lat - p.projCenterLat) * METERS_PER_DEG) / p.cellResolution +
+    p.cellSpaceDimensionLat / 2;
+  return {
+    x: clampGridIndex(xRaw, p.cellSpaceDimension),
+    y: clampGridIndex(yRaw, p.cellSpaceDimensionLat),
+  };
+}
+
 /** Cell center (integer grid indices) → lat/lng — inverse of pin / line placement. */
 export function gridCellCenterToLatLng(
   gx: number,
