@@ -6,7 +6,7 @@ import { ensureAuthedUser } from "@/lib/devsfire/routeHandlers";
 import { setSessionCookie } from "@/lib/devsfire/session";
 
 export const runtime = "nodejs";
-export const maxDuration = 360;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
