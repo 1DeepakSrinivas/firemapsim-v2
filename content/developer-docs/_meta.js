@@ -1,6 +1,5 @@
 export default {
   "*": { type: "doc", theme: { layout: "full", toc: true } },
-  index: "Overview",
   "implemented-functions": "Implemented Functions",
   "implementation-details": "Implementation Details",
   "ai-technologies": "AI Technologies",
