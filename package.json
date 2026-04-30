@@ -2,6 +2,7 @@
   "name": "firesimmap-v2",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "packageManager": "bun@1.3.1",
   "scripts": {
     "dev": "bun scripts/dev.mjs",

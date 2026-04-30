@@ -1,46 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FireMapSim (firesimmap-v2)
 
-## Getting Started
+AI-assisted wildfire simulation workspace: **Next.js** map UI, **Mastra** setup agent with tools, **Supabase** persistence, **Clerk** authentication, **Open-Meteo** weather, and **DEVS-FIRE** via secure server-side HTTP.
 
-First, run the development server:
+## Quick start
+
+**Prerequisites:** [Bun](https://bun.sh/) (see `packageManager` in `package.json`), Git.
 
 ```bash
+bun install
+cp .env.example .env
+# Fill in keys in .env (Clerk, Supabase, OpenRouter, DEVS-FIRE, etc.)
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **App:** [http://localhost:3000](http://localhost:3000)  
+- **Mastra dev / Studio:** [http://localhost:4111](http://localhost:4111) (`bun dev` runs Next + Mastra together via `scripts/dev.mjs`)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Split dev processes: `bun run dev:next` and `bun run dev:mastra`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment
 
-## Testing Convention
+[`/.env.example`](.env.example) is the source of truth for variable names and short comments. Supabase, Clerk, OpenRouter, `DATABASE_URL` (when needed for Mastra), and DEVS-FIRE keys are documented there.
 
-- Canonical test location is the root `__tests__/` tree, mirrored by source area (`__tests__/app`, `__tests__/lib`, `__tests__/mastra`, `__tests__/types`).
-- New co-located tests in `src/**/*.test.ts(x)` are deprecated and blocked by `bun run test:guard:placement`.
-- Run tests with:
+## Documentation
+
+| Audience | Where |
+|----------|--------|
+| **Engineering (by subsystem)** | [`docs/README.md`](docs/README.md) — Next.js, Mastra, Supabase, Clerk, maps, weather, DEVS-FIRE, testing, Nextra |
+| **End users (in-app)** | `/docs` — Nextra content in [`content/`](content/) |
+| **Contributing** | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| **License** | [`LICENSE`](LICENSE) (MIT) |
+| **AI assistants / Next quirks** | [`AGENTS.md`](AGENTS.md) |
+
+## Testing
 
 ```bash
 bun run test
 ```
 
-## Learn More
+Tests must live under `__tests__/` (see [`docs/testing.md`](docs/testing.md)).
 
-To learn more about Next.js, take a look at the following resources:
+## DEVS-FIRE connectivity
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Use `bun run devsfire:connect` for a direct upstream probe. In-app smoke checks require a **signed-in** session because `/api/devs-fire/*` is Clerk-protected. Details: [`docs/devs-fire.md`](docs/devs-fire.md).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Build
 
-## Deploy on Vercel
+```bash
+bun run build
+bun run start
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deployment (Vercel)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This repo configures Git-triggered deployments **only from `main`** ([`vercel.json`](vercel.json)). Set the Vercel project **Production Branch** to `main` under Project → Environments → Production.
 
-## Vercel Deployment Policy
+---
 
-- This repository enforces Git-triggered deployments only from `main` via [`vercel.json`](./vercel.json).
-- Required Vercel project setting: set **Production Branch** to `main` in `Project Settings -> Environments -> Production -> Branch Tracking`.
-- Operational guardrail: merge to `main` is the only normal release path.
+Licensed under MIT; see [`LICENSE`](LICENSE).

@@ -1,20 +1,30 @@
 ---
 title: Developer Docs
-description: Technical architecture, implementation details, and backend integration references for FireMapSim-v2.
+description: Pointers to subsystem engineering documentation in the repository.
 asIndexPage: true
 ---
 
-This section is the technical/developer-facing documentation entity inside `/docs`.
+Engineering documentation is maintained **in the GitHub repository** under [`docs/`](https://github.com/1DeepakSrinivas/firemapsim-v2/tree/main/docs) so it stays next to the code and is updated in the same change sets as the implementation.
 
-## Contents
+## Repository docs (source of truth)
 
-- [Implemented Functions](/docs/developer-docs/implemented-functions)
-- [Implementation Details](/docs/developer-docs/implementation-details)
-- [AI Technologies](/docs/developer-docs/ai-technologies)
-- [System Architecture](/docs/developer-docs/system-architecture)
-- [DEVS-FIRE Backend Architecture](/docs/developer-docs/backend-architecture)
-- [DEVS-FIRE MCP Server](/docs/developer-docs/devsfire-mcp-server)
+Start at the index: **[`docs/README.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/README.md)**
 
-## Source of truth
+| Area | File |
+|------|------|
+| Next.js | [`docs/nextjs.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/nextjs.md) |
+| Mastra | [`docs/mastra.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/mastra.md) |
+| Supabase | [`docs/supabase.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/supabase.md) |
+| Clerk (auth) | [`docs/auth-clerk.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/auth-clerk.md) |
+| Maps / geospatial | [`docs/maps-and-geospatial.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/maps-and-geospatial.md) |
+| Weather | [`docs/weather.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/weather.md) |
+| DEVS-FIRE | [`docs/devs-fire.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/devs-fire.md) |
+| Testing | [`docs/testing.md`](https://github.com/1DeepakSrinivas/firemapsim-v2/blob/main/docs/testing.md) |
 
-The original engineering markdown remains in the repository root `docs/` folder. This section mirrors selected content into the docs site so it can be browsed alongside end-user documentation.
+## In-app only
+
+- [DEVS-FIRE MCP Server](/docs/developer-docs/devsfire-mcp-server) — external documentation MCP for endpoint discovery (not duplicated in `docs/`).
+
+## End-user documentation
+
+Product guides and tutorials live under the same `/docs` site outside this folder — see the main docs sidebar (for example **Getting Started**).

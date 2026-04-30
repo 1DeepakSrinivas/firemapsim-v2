@@ -1,0 +1,425 @@
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{mathptmx}   % Times New Roman for text and math
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{tikz}
+
+\usetikzlibrary{arrows.meta,positioning,shapes,fit}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+% ---- Cover page fields ----
+\newcommand{\ReportTitle}{FireMapSim-v2 \\ An Agentic Wildfire Simulation Workspace}
+\newcommand{\AuthorName}{Deepak Srinivas Govindarajan}
+\newcommand{\AuthorEmail}{dg1@student.gsu.edu}
+\newcommand{\CourseName}{{CSC 4980 Simulation and AI}}
+\newcommand{\InstitutionName}{\textbf{Georgia State University}}
+\newcommand{\SubmissionDate}{April 29, 2026}
+\begin{document}
+
+% =========================
+% Cover page
+% =========================
+\begin{titlepage}
+  \centering
+  \vspace*{\fill}
+
+  {\LARGE \textbf{\ReportTitle}\par}
+  \vspace{0.25in}
+
+  {\large \textbf{} \AuthorName \par \AuthorEmail \par}
+  \vspace{0.25in}
+
+  {\large \textbf{} \CourseName\par}
+  \vspace{0.1in}
+  {\large \InstitutionName\par}
+  \vspace{0.2in}
+  {\large \SubmissionDate\par}
+  \vspace{0.2in}
+  {\large \href{https://github.com/1DeepakSrinivas/firemapsim-v2}{Source Repository (GitHub)}}
+  \vspace*{\fill}
+\end{titlepage}
+
+\pagenumbering{arabic}
+
+% =========================
+% Core content
+% =========================
+
+% -----------------------------------------------------------------
+\section{Problem Statement}
+% -----------------------------------------------------------------
+Wildfire simulation tooling tends to assume a technically experienced operator who is comfortable juggling coordinate systems, weather inputs, and model-specific parameters. FireMapSim-v2 targets the gap between complex numerical models (e.g., DEVS-FIRE) and real-world decision tempo by offering:
+\begin{enumerate}
+    \item A map-first workspace for specifying boundaries and ignitions
+    \item An AI agent that guides the scenario setup process and synchronizes decisions back into the UI.
+\end{enumerate}
+
+\subsection{Objectives}
+The project aims to:
+\begin{enumerate}
+    \item Reduce setup friction by collecting parameters sequentially
+    \item Automate data gathering from location inputs (address/ZIP/coordinates)
+    \item Provide real-time visualization and replay of simulation results
+    \item persist projects and results for iteration and auditability.
+\end{enumerate}
+
+\subsection{Motivation}
+FireMapSim-v2 is motivated by five practical needs observed in wildfire simulation workflows:
+\begin{enumerate}
+    \item \textbf{An easy-to-follow workflow (vs.\ legacy FireMapSim).} Scenario setup should be a
+    predictable, stepwise process rather than a collection of loosely coupled forms and parameters.
+    \item \textbf{A guided, agentic flow.} An AI assistant can enforce ordering and completeness
+    (location $\rightarrow$ grid $\rightarrow$ weather $\rightarrow$ ignitions $\rightarrow$ fuel
+    breaks $\rightarrow$ run) while still allowing targeted manual edits when desired.
+    \item \textbf{Dynamic data gathering.} Key inputs (e.g., geocoded coordinates and weather)
+    should be fetched from authoritative services when the user provides minimal information such
+    as a place name, ZIP code, or map click.
+    \item \textbf{UI/UX-first design.} A map-first interface, immediate visual feedback, and
+    clear confirmation points reduce cognitive load and help prevent configuration errors.
+    \item \textbf{A Full-Stack Suite.} A unified frontend, backend, and persistence layer enables
+    secure proxying to external simulators, consistent validation, reproducible runs, and saved
+    project history for iteration and later review.
+\end{enumerate}
+
+\subsection{Scope}
+The current scope includes a Next.js map workspace~\cite{nextjs} (Leaflet~\cite{leaflet} +
+overlays), Mastra-based agentic orchestration~\cite{mastra}, weather and geospatial data
+integration (Open-Meteo~\cite{openmeteo}, Nominatim~\cite{nominatim}), DEVS-FIRE proxy
+endpoints~\cite{devsfire}, project persistence (PostgreSQL (Supabase)~\cite{supabase}), and authentication
+(Clerk~\cite{clerk}).
+
+% -----------------------------------------------------------------
+\section{Implemented Functions}
+% -----------------------------------------------------------------
+FireMapSim-v2 implements the following core functions:
+\begin{itemize}
+  \item \textbf{Geospatial project workspace:} map visualization, project boundary definition, and
+        drawing tools for ignitions and suppression/fuel-break lines.
+  \item \textbf{Agentic simulation planner:} a Mastra agent (\texttt{firesim-agent}) that runs a
+        strict sequential setup flow in guided mode and performs targeted edits in manual mode.
+  \item \textbf{Dynamic weather integration:} server routes and tools to fetch current/hourly
+        weather and populate scenario fields.
+  \item \textbf{Simulation lifecycle management:} run, progress feedback, and replay (latest
+        simulation overlays + metrics).
+  \item \textbf{Persistence and state management:} cloud-backed project storage and a client-side
+        workspace store for plan synchronization.
+  \item \textbf{Authentication:} Clerk-based route protection and user identity for project
+        ownership.
+\end{itemize}
+
+% Figure: Workspace entry UI — placed here as the first visual impression
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\linewidth]{images/project-report/ui-project.png}
+  \caption{Workspace entry UI showing the project list and map canvas.}
+  \label{fig:ui-project}
+\end{figure}
+
+% -----------------------------------------------------------------
+\section{System Design}
+% -----------------------------------------------------------------
+
+\subsection{Architecture Overview}
+FireMapSim-v2 is structured as a full-stack, agent-synchronized system. A user's actions live in a
+shared \emph{plan} state. The agent reads a runtime context snapshot each turn and applies changes
+via tools. The server mediates external calls (weather, parcels, DEVS-FIRE) and persists projects
+to a PostgreSQL database (via Supabase). \\
+Figure~\ref{fig:architecture} shows the major components and the primary data/control flows.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.78\linewidth]{images/project-report/sys-arch.png}
+  \caption{System architecture diagram showing the client workspace, Next.js API layer, Mastra
+           agent, and external services.}
+  \label{fig:architecture}
+\end{figure}
+
+\subsection{Component Interaction (Agent $\leftrightarrow$ UI)}
+The interaction model is built around a \emph{plan-as-truth} approach:
+\begin{enumerate}
+  \item The client maintains a scenario plan (center coordinates, grid, weather, ignitions, fuel
+        breaks).
+  \item The chat host (\texttt{src/components/map/ProjectAgentChatHost.tsx}) streams messages to
+        \texttt{/api/agent} and includes a runtime context object in the request body:
+        \texttt{mode} (manual vs.\ guided) and \texttt{planSnapshot} (the current plan state).
+  \item The Mastra agent chooses between concise manual edits or a guided sequence
+        (location $\rightarrow$ grid $\rightarrow$ weather $\rightarrow$ ignitions $\rightarrow$
+        fuel breaks $\rightarrow$ run).
+  \item The agent API route (\texttt{src/app/api/agent/route.ts}) injects the runtime context as a
+        \texttt{RUNTIME\_CONTEXT} system message and invokes the Mastra agent
+        (\texttt{agentId:firesim-agent}).
+  \item Confirmed values are applied via the Mastra tool \\ \texttt{update-plan}
+        (\texttt{src/mastra/tools/api/updatePlan.ts}), which emits a validated patch consumed by
+        the UI to update the plan deterministically.
+  \item When explicitly requested, the agent issues a \texttt{run-simulation} command tool \\
+        (\texttt{src/mastra/tools/api/projectCommands.ts}), which triggers the server simulation
+        flow and returns replay-ready overlays and metrics.
+\end{enumerate}
+
+
+% Figure: Map overlays — placed after the UI interaction description
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\linewidth]{images/project-report/ui-fuel.png}
+  \caption{Map overlays and scenario controls: fuel-break and ignition drawing tools active on
+           the project canvas.}
+  \label{fig:ui-fuel}
+\end{figure}
+
+% -----------------------------------------------------------------
+\section{AI Technologies and Frameworks}
+% -----------------------------------------------------------------
+
+\subsection{Mastra}
+Mastra provides the agent runtime, tools abstraction, and workflow composition~\cite{mastra}. In
+FireMapSim-v2, the agent is configured with explicit operational modes (\texttt{manual}
+vs.\ \texttt{chat}) and uses tool calls to mutate the shared plan state. A companion workflow
+(\texttt{simulateWorkflow}) demonstrates stepwise orchestration: resolve area (including
+parcel/boundary), gather weather (Open-Meteo~\cite{openmeteo}), then run or delegate to a
+DEVS-FIRE execution path~\cite{devsfire}.
+
+\subsection{OpenRouter and Qwen 3.5}
+The agent uses OpenRouter as an LLM gateway~\cite{openrouter} with a Qwen~3.5 model~\cite{qwen}.
+In code, the model id is configured as \texttt{openrouter/qwen/qwen3.5-397b-a17b} and is invoked
+with application headers to support provider policy and analytics.
+
+\subsection{Vercel AI SDK}
+The UI uses the Vercel AI SDK for streaming chat and message state~\cite{vercelaisdk}.
+Specifically, \texttt{@ai-sdk/react} provides \texttt{useChat}, and the project uses a transport
+that attaches runtime context in the request body so the agent can treat the current plan as
+source-of-truth each turn.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.7\linewidth]{images/project-report/agent-arch.png}
+  \caption{Agent architecture: \texttt{firesim-agent} tool graph and the guided sequential setup
+           flow managed by Mastra.}
+  \label{fig:agent-arch}
+\end{figure}
+
+% -----------------------------------------------------------------
+\section{Implementation Details}
+% -----------------------------------------------------------------
+
+\subsection{Key Files and Classes}
+
+\textbf{Agent definition.}
+The \texttt{firesim-agent} is defined in
+\texttt{src/mastra/agents/firesim-agent.ts}. It encodes the sequential guided flow, mode
+constraints, and tool usage rules (e.g., always set both center coordinates together).
+
+\textbf{Model provider.}
+OpenRouter configuration and the Qwen~3.5 model id live in \\
+\texttt{src/mastra/llm/openrouter.ts}. Vercel's AI-SDK allows this to be configured with various other providers (Anthropic, OpenAI, Google Gemini etc) as well.
+
+\textbf{Workflow orchestration.}
+\texttt{src/mastra/workflows/simulate.ts} composes steps to resolve area (including parcel
+boundary), branch weather gathering, and run simulation, emitting progress events for UI
+consumption.
+
+\textbf{Workspace UI.}
+The primary client workspace is \texttt{src/components/map/ProjectWorkspace.tsx}, which
+coordinates: plan state, chat UI, map interactions, weather overrides, simulation execution, and
+replay controls.
+
+\textbf{Chat host.}
+\texttt{src/components/map/ProjectAgentChatHost.tsx} wraps \texttt{useChat} and ensures each
+request carries a runtime context body (mode + plan snapshot) to the agent API.
+
+\textbf{Agent API route.}
+\texttt{src/app/api/agent/route.ts} authenticates the user (Clerk), constructs a runtime context,
+and injects it as a \texttt{RUNTIME\_CONTEXT} system message before delegating to Mastra for
+streaming responses.
+
+\textbf{DEVS-FIRE session handling}
+To avoid exposing upstream simulation credentials to the browser, FireMapSim-v2 uses a server-side
+session cookie for DEVS-FIRE. A connection handshake stores the upstream \texttt{userToken} in an
+\texttt{HttpOnly} cookie (set server-side, not readable by client JavaScript) with a bounded TTL.
+Subsequent proxy requests attach the cookie automatically; the server extracts and validates the
+token before forwarding requests to DEVS-FIRE.
+
+\textbf{DEVS-FIRE proxy and execution.}
+\texttt{src/app/api/devs-fire/route.ts} provides an authenticated server-side proxy to DEVS-FIRE
+endpoints (never calling the upstream directly from the browser). The execution layer
+\texttt{src/lib/runDevsFireFromPlan.ts} converts the plan into DEVS-FIRE calls (including
+time-step conversion, ignition dispatch, and retry handling) and returns operation logs and
+metrics for replay.
+
+\subsection{Development Environment and Setup}
+
+\textbf{Runtime and tooling.} FireMapSim-v2 is a Bun~\cite{bun} + Next.js~\cite{nextjs} application.
+Local development uses Bun as the package manager and task runner.
+
+\textbf{Install and run.} Install dependencies and start the dev server with:
+\texttt{bun install} and \texttt{bun dev}.
+
+\textbf{Source repository.} \url{https://github.com/1DeepakSrinivas/firemapsim-v2}.
+
+\textbf{Configuration and credentials.} The project requires runtime 
+configuration for:
+\begin{enumerate}
+    \item LLM access (API key of LLM provider: OpenRouter, Anthropic, Google AI, Open AI etc.)
+    \item Authentication
+    \item Persistence / Storage
+\end{enumerate}
+% -----------------------------------------------------------------
+\section{Demonstration Scenario}
+% -----------------------------------------------------------------
+ 
+\textbf{Deployed application link: }
+\url{https://fsm2.1deepaksrinivas.com}.\\
+\textbf{Demonstration video can be found at: }\href{https://studentgsu-my.sharepoint.com/:f:/g/personal/dg1_student_gsu_edu/IgAzkP_y2Yd3RZdQWtPKkcMoAdjpINCLZv88UWaDKpnDWgM?e=P2Qxod}{Link to SharePoint Folder}
+
+\subsection{Scenario: Clearwater, Kansas --- Guided Setup Walkthrough}
+This section presents a guided setup walkthrough (\texttt{mode="chat"}) of setting up the entire simulation scenario for Clearwater, Kansas.
+\subsubsection{Sequence of Interactions (Summary)}
+\begin{enumerate}
+  \item \textbf{Guided mode handshake (runtime context).}
+  \begin{itemize}
+    \item \textbf{User message (example):} ``Please guide me through setting up a simulation.''
+    \item \textbf{UI request:} POST to \texttt{/api/agent} with \texttt{threadId} and
+          \texttt{mode="chat"}, including \texttt{planSnapshot} (the current plan state) so the agent can
+          skip already-complete fields.
+    \item \textbf{Agent API:} injects \texttt{RUNTIME\_CONTEXT} and invokes Mastra
+          \texttt{firesim-agent}.
+  \end{itemize}
+
+  \item \textbf{Step 1 --- Location (Clearwater, Kansas).}
+  \begin{itemize}
+    \item \textbf{User message:} ``Set the location to Clearwater, Kansas.''
+    \item \textbf{Agent response:} confirms the resolved coordinates and requests confirmation.
+    \item \textbf{Tool calls:}
+      \begin{itemize}
+        \item \texttt{geo-geocode-address} (resolve place name via Nominatim).
+        \item \texttt{update-plan} with \texttt{proj\_center\_lat} and \texttt{proj\_center\_lng}
+              (and \texttt{boundaryGeoJSON} when available).
+      \end{itemize}
+    \item \textbf{UI:} map recenters and project boundary appears (Figure~\ref{fig:ui-project}).
+  \end{itemize}
+
+  \item \textbf{Step 2 --- Grid parameters.}
+  \begin{itemize}
+    \item \textbf{Agent response:} proposes defaults for grid resolution and dimensions; user confirms.
+    \item \textbf{Tool call:} \texttt{update-plan} with confirmed \texttt{cellResolution},
+          \texttt{cellSpaceDimension}, and \texttt{cellSpaceDimensionLat}.
+    \item \textbf{UI:} the grid meta updates and becomes the constraint system for geometry edits.
+  \end{itemize}
+
+  \item \textbf{Step 3 --- Weather (dynamic fetch).}
+  \begin{itemize}
+    \item \textbf{User message (example):} ``Fetch current weather.'' (or confirm displayed weather)
+    \item \textbf{Tool calls:}
+      \begin{itemize}
+        \item \texttt{weather-fetch-weather} for the project center coordinates (Open-Meteo).
+        \item \texttt{update-plan} patching \texttt{windSpeed}, \texttt{windDegree}, \texttt{temperature},
+              \texttt{humidity}.
+      \end{itemize}
+    \item \textbf{UI:} weather panels and downstream simulation inputs update consistently.
+  \end{itemize}
+
+  \item \textbf{Step 4 --- Ignitions (grid-cell geometry).}
+  \begin{itemize}
+    \item \textbf{User message (example):} ``Add a square ignition centered in the grid.'' 
+    \item \textbf{Agent response:} translates the intent into grid-cell segments and requests confirmation.
+    \item \textbf{Tool call:} \texttt{update-plan} writing ignition segments into \texttt{team\_infos[*].details}
+          using canonical \texttt{start\_x/start\_y/end\_x/end\_y} fields.
+    \item \textbf{UI:} ignition overlays render on the map canvas.
+  \end{itemize}
+
+  \item \textbf{Step 5 --- Fuel breaks (suppression lines).}
+  \begin{itemize}
+    \item \textbf{User message (example):} ``Add perimeter fuel breaks 300\,m from the edges.''
+    \item \textbf{Tool call:} \texttt{update-plan} writing suppression segments into \texttt{sup\_infos}.
+    \item \textbf{UI:} fuel-break overlays render and remain editable (Figure~\ref{fig:ui-fuel}).
+  \end{itemize}
+
+  \item \textbf{Step 6 --- Run and replay.}
+  \begin{itemize}
+    \item \textbf{Agent response:} summarizes all fields and asks for explicit confirmation.
+    \item \textbf{Tool call:} \texttt{run-simulation} (optionally including \texttt{simulationTimesteps}).
+    \item \textbf{Server flow:} the UI triggers server-side execution; DEVS-FIRE calls are proxied via
+          \texttt{/api/devs-fire} using a server-held session cookie for the upstream token.
+    \item \textbf{UI:} replay controls, overlays, and summary metrics become available
+          (see Figure~\ref{fig:agent-arch} for the agent tool graph driving the flow).
+  \end{itemize}
+\end{enumerate}
+
+% -----------------------------------------------------------------
+\section{Conclusions}
+% -----------------------------------------------------------------
+FireMapSim-v2 demonstrates a practical pattern for agentic geospatial systems: treat UI state as a
+formal plan, require explicit confirmation before mutation, and use structured tool calls to
+synchronize changes deterministically. By combining a modern map workspace with Mastra-powered
+orchestration and a robust DEVS-FIRE integration layer, the system reduces configuration friction
+and supports reproducible simulation runs.
+
+\newpage
+% =========================
+% Inline bibliography
+% =========================
+\begin{thebibliography}{99}
+
+\bibitem{nextjs}
+  \textit{Next.js Documentation}.
+  \url{https://nextjs.org/docs}.
+
+\bibitem{mastra}
+  \textit{Mastra Framework}.
+  \url{https://mastra.ai/}.
+
+\bibitem{openrouter}
+  \textit{OpenRouter API}.
+  \url{https://openrouter.ai/docs}.
+
+\bibitem{qwen}
+  \textit{Qwen: Large Language Model Family}.
+  \url{https://github.com/QwenLM}.
+
+\bibitem{vercelaisdk}
+  \textit{Vercel AI SDK}.
+  \url{https://sdk.vercel.ai/}.
+
+\bibitem{leaflet}
+  \textit{Leaflet: An Open-Source JavaScript Library for Interactive Maps}.
+  \url{https://leafletjs.com/}.
+
+\bibitem{supabase}
+  \textit{Supabase Documentation}.
+  \url{https://supabase.com/docs}.
+
+\bibitem{clerk}
+  \textit{Clerk Authentication}.
+  \url{https://clerk.com/docs}.
+
+\bibitem{openmeteo}
+  \textit{Open-Meteo Weather API}.
+  \url{https://open-meteo.com/}.
+
+\bibitem{nominatim}
+  \textit{Nominatim: OpenStreetMap Search}.
+  \url{https://nominatim.org/}.
+
+\bibitem{devsfire}
+  \textit{DEVS-FIRE Research API (GSU)}.
+  \url{https://sims.cs.gsu.edu/sims/research/DEVSFIRE_API.html}.
+
+\bibitem{bun}
+\textit{Bun: A fast all-in-one JavaScript runtime}
+\url{https://bun.com/docs}
+
+\end{thebibliography}
+
+\end{document}
